@@ -1,0 +1,6 @@
+﻿{
+  "allowed_hosts": [
+    ".acibadem.com.tr",
+    ".medicalpark.com.tr"
+  ]
+}

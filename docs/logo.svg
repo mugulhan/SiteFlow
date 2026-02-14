@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="240" viewBox="0 0 640 240" role="img" aria-label="SitemapFlow logo placeholder">
+  <rect width="640" height="240" fill="#f1f5f9"/>
+  <rect x="24" y="24" width="592" height="192" rx="20" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+  <g fill="none" stroke="#2563eb" stroke-width="6" stroke-linecap="round">
+    <circle cx="110" cy="120" r="34" fill="#dbeafe" stroke="#2563eb"/>
+    <circle cx="230" cy="78" r="22" fill="#dbeafe" stroke="#2563eb"/>
+    <circle cx="230" cy="162" r="22" fill="#dbeafe" stroke="#2563eb"/>
+    <line x1="140" y1="108" x2="210" y2="88"/>
+    <line x1="140" y1="132" x2="210" y2="152"/>
+  </g>
+  <text x="300" y="120" font-family="Arial, sans-serif" font-size="36" fill="#0f172a" font-weight="700">SitemapFlow</text>
+  <text x="300" y="154" font-family="Arial, sans-serif" font-size="16" fill="#475569">Logo placeholder</text>
+</svg>

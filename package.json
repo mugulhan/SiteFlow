@@ -1,0 +1,31 @@
+{
+  "name": "sitemapflow",
+  "version": "1.1.2",
+  "private": true,
+  "description": "SitemapFlow dashboard with persistent storage",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon --watch server.js --watch app.js server.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "express-session": "^1.18.2",
+    "node-cron": "^3.0.3",
+    "pino": "^9.4.0",
+    "pino-http": "^10.4.0",
+    "puppeteer": "^24.26.0",
+    "puppeteer-core": "^24.26.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "sax": "^1.4.1",
+    "undici": "^6.19.6",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  }
+}

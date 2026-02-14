@@ -1,0 +1,19 @@
+services:
+  siteflow:
+    build:
+      context: .
+      args:
+        NODE_ENV: development
+        INSTALL_DEV: "true"
+    command: npm run dev
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./:/app
+      - /app/node_modules
+      - ./data:/app/data
+    ports:
+      - "4000:3000"
+    restart: unless-stopped

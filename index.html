@@ -1,0 +1,938 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SitemapFlow</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script
+      src="https://cdn.jsdelivr.net/npm/moment@2.29.4/min/moment-with-locales.min.js"
+      defer
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+      defer
+    ></script>
+    <script src="iconify-lite.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell" data-sidebar="collapsed">
+      <aside
+        class="sidebar"
+        id="sidebar"
+        aria-label="Main navigation"
+        data-i18n-attr="aria-label:sidebar.aria"
+      >
+        <div class="sidebar__rail" aria-label="Quick navigation">
+          <div class="sidebar__rail-buttons">
+            <button
+              type="button"
+              class="sidebar__rail-logo"
+              aria-label="SitemapFlow home"
+            >
+              <span>SF</span>
+            </button>
+            <button
+              type="button"
+              class="sidebar__rail-button sidebar__rail-button--ghost"
+              aria-label="Create new workspace"
+            >
+              <iconify-icon
+                icon="mdi:plus"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              ></iconify-icon>
+            </button>
+            <div class="sidebar__rail-divider" role="presentation"></div>
+            <button
+              type="button"
+              class="sidebar__rail-button sidebar__rail-button--active"
+              aria-label="Home"
+            >
+              <iconify-icon
+                icon="mdi:home-variant-outline"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              ></iconify-icon>
+            </button>
+            <button
+              type="button"
+              class="sidebar__rail-button"
+              aria-label="Discover"
+            >
+              <iconify-icon
+                icon="mdi:compass-outline"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              ></iconify-icon>
+            </button>
+            <button
+              type="button"
+              class="sidebar__rail-button"
+              aria-label="Spaces"
+            >
+              <iconify-icon
+                icon="mdi:view-grid-outline"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              ></iconify-icon>
+            </button>
+            <button
+              type="button"
+              class="sidebar__rail-button"
+              aria-label="Finance"
+            >
+              <iconify-icon
+                icon="mdi:chart-line"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              ></iconify-icon>
+            </button>
+            <div class="sidebar__rail-divider sidebar__rail-divider--grow" role="presentation"></div>
+            <button
+              type="button"
+              class="sidebar__rail-button"
+              aria-label="Account"
+            >
+              <iconify-icon
+                icon="mdi:account-outline"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              ></iconify-icon>
+            </button>
+            <button
+              type="button"
+              class="sidebar__rail-button"
+              aria-label="Upgrade"
+            >
+              <iconify-icon
+                icon="mdi:arrow-up-bold-box-outline"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              ></iconify-icon>
+            </button>
+            <button
+              type="button"
+              class="sidebar__rail-button"
+              aria-label="Install app"
+            >
+              <iconify-icon
+                icon="mdi:download"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              ></iconify-icon>
+            </button>
+          </div>
+          <div class="sidebar__rail-content">
+            <div class="sidebar__section" aria-label="Workspace info">
+              <div class="sidebar__section-content">
+                <span class="sidebar__section-label">Workspace</span>
+                <span class="sidebar__section-muted" id="userName">siteflow</span>
+              </div>
+              <button
+              type="button"
+              class="sidebar__section-button"
+              aria-label="Change workspace"
+            >
+              <iconify-icon icon="mdi:chevron-down" width="18" height="18"></iconify-icon>
+            </button>
+          </div>
+          <nav class="sidebar__nav" aria-label="Main menu" data-i18n-attr="aria-label:nav.menu">
+            <button
+              class="sidebar__link sidebar__link--active"
+              type="button"
+              id="dashboardNav"
+            >
+              <iconify-icon
+                icon="mdi:view-dashboard-outline"
+                width="20"
+                height="20"
+                aria-hidden="true"
+              ></iconify-icon>
+              <span data-i18n-key="nav.dashboard">Dashboard</span>
+            </button>
+            <button
+              class="sidebar__link sidebar__link--disabled"
+              type="button"
+              disabled
+            >
+              <iconify-icon
+                icon="mdi:chart-timeline-variant"
+                width="20"
+                height="20"
+                aria-hidden="true"
+              ></iconify-icon>
+              <span data-i18n-key="nav.reports">Reports (coming soon)</span>
+            </button>
+            <button
+              class="sidebar__link"
+              type="button"
+              id="settingsNav"
+            >
+              <iconify-icon
+                icon="mdi:cog-outline"
+                width="20"
+                height="20"
+                aria-hidden="true"
+              ></iconify-icon>
+              <span data-i18n-key="nav.settings">Settings</span>
+            </button>
+          </nav>
+          <div class="sidebar__actions" role="group" aria-label="Account actions">
+            <button class="sidebar__link sidebar__link--ghost" type="button">
+              <iconify-icon
+                icon="mdi:account-outline"
+                width="20"
+                height="20"
+                aria-hidden="true"
+              ></iconify-icon>
+              <span>Account</span>
+            </button>
+            <button class="sidebar__link sidebar__link--highlight" type="button">
+              <iconify-icon
+                icon="mdi:star-outline"
+                width="20"
+                height="20"
+                aria-hidden="true"
+              ></iconify-icon>
+              <span>Upgrade</span>
+            </button>
+            <button class="sidebar__link sidebar__link--ghost" type="button">
+              <iconify-icon
+                icon="mdi:download-box"
+                width="20"
+                height="20"
+                aria-hidden="true"
+              ></iconify-icon>
+              <span>Install App</span>
+            </button>
+            <button
+              class="sidebar__link sidebar__link--danger"
+              type="button"
+              id="logoutButton"
+            >
+              <iconify-icon
+                icon="mdi:logout"
+                width="20"
+                height="20"
+                aria-hidden="true"
+              ></iconify-icon>
+              <span data-i18n-key="nav.logout">Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="layout">
+        <header class="app-header" aria-label="Project header">
+          <div class="app-header__left">
+            <button
+              type="button"
+              class="sidebar-trigger"
+              data-role="sidebar-toggle"
+              aria-expanded="false"
+              aria-controls="sidebar"
+              aria-label="Open menu"
+            >
+              <iconify-icon icon="mdi:menu" width="22" height="22" aria-hidden="true"></iconify-icon>
+              <span class="visually-hidden" data-role="sidebar-toggle-text">Open menu</span>
+            </button>
+            <div class="app-header__titles">
+              <span class="app-header__eyebrow">SitemapFlow</span>
+              <span class="app-header__title" data-i18n-key="nav.dashboard">Dashboard</span>
+            </div>
+          </div>
+          <div class="app-header__right">
+            <div class="notification-center" id="scanNotificationCenter">
+              <button
+                type="button"
+                class="notification-center__bell"
+                id="scanNotificationBell"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="scanNotificationPanel"
+                data-i18n-attr="aria-label:notification.center.open"
+              >
+                <iconify-icon icon="mdi:bell-outline" width="20" height="20" aria-hidden="true"></iconify-icon>
+                <span class="notification-center__badge" id="scanNotificationBadge" hidden>0</span>
+              </button>
+              <section
+                class="notification-center__panel"
+                id="scanNotificationPanel"
+                role="dialog"
+                aria-modal="false"
+                hidden
+              >
+                <header class="notification-center__header">
+                  <h3 class="notification-center__title" data-i18n-key="notification.center.title">Notifications</h3>
+                  <button
+                    type="button"
+                    class="notification-center__close"
+                    id="scanNotificationClose"
+                    data-i18n-attr="aria-label:notification.center.close"
+                  >
+                    <iconify-icon icon="mdi:close" width="16" height="16" aria-hidden="true"></iconify-icon>
+                  </button>
+                </header>
+                <ul class="notification-center__list" id="scanNotificationList"></ul>
+                <p class="notification-center__empty" id="scanNotificationEmpty" data-i18n-key="notification.center.empty">
+                  No notifications yet.
+                </p>
+                <footer class="notification-center__footer">
+                  <button
+                    type="button"
+                    class="notification-center__action"
+                    id="scanNotificationReadAll"
+                    data-i18n-key="notification.center.readAll"
+                  >
+                    Mark all as read
+                  </button>
+                </footer>
+              </section>
+            </div>
+            <div class="app-header__pill">
+              <iconify-icon icon="mdi:account-circle" width="18" height="18" aria-hidden="true"></iconify-icon>
+              <span id="headerWorkspace">siteflow</span>
+            </div>
+          </div>
+        </header>
+        <div class="layout__body">
+        <main class="page">
+<div id="dashboardPage">
+            <section class="controls">
+              <label class="controls__label" for="searchInput" data-i18n-key="controls.filter">Filter</label>
+              <input
+                id="searchInput"
+                class="controls__input"
+                type="search"
+                placeholder="Search by URL or title"
+                data-i18n-attr="placeholder:controls.searchPlaceholder"
+              />
+              <button id="refreshButton" class="controls__button" type="button" data-i18n-key="controls.refresh">
+                Refresh
+              </button>
+              <button
+                id="notificationButton"
+                class="controls__button controls__button--outline"
+                type="button"
+                data-i18n-key="controls.notifications.enable"
+              >
+                Enable Notifications
+              </button>
+              <button
+                id="exportSitemapsCsv"
+                class="controls__button controls__button--outline"
+                type="button"
+                data-i18n-key="controls.exportCsv"
+              >
+                Export CSV
+              </button>
+              <button
+                id="exportSitemapsJson"
+                class="controls__button controls__button--outline"
+                type="button"
+                data-i18n-key="controls.exportJson"
+              >
+                Export JSON
+              </button>
+              <label class="toggle-switch controls__toggle">
+                <input id="alertsOnlyToggle" class="toggle-switch__input" type="checkbox" />
+                <span class="toggle-switch__slider" aria-hidden="true"></span>
+                <span class="toggle-switch__label" data-i18n-key="controls.alertsOnly">
+                  Show Alerts Only
+                </span>
+              </label>
+            </section>
+
+            <section class="status" id="status" aria-live="polite"></section>
+
+            <section class="domain" aria-label="Domain filters" data-i18n-attr="aria-label:domain.filters">
+              <span class="domain__label" data-i18n-key="domain.label">Domain</span>
+              <nav class="domain__list" id="domainFilter"></nav>
+            </section>
+
+            <section class="tags" aria-label="Tag filters" data-i18n-attr="aria-label:tags.filters">
+              <span class="tags__label" data-i18n-key="tags.label">Tag</span>
+              <nav class="tags__list" id="tagFilter"></nav>
+            </section>
+
+            <section class="adder-tabs" aria-label="Sitemap tools" data-i18n-attr="aria-label:adder.tabs.aria">
+              <div class="adder-tabs__nav" role="tablist">
+                <button
+                  type="button"
+                  class="adder-tabs__tab adder-tabs__tab--active"
+                  data-role="adder-tab"
+                  data-tab="discover"
+                  role="tab"
+                  aria-selected="true"
+                  data-i18n-key="adder.tab.discover"
+                >
+                  Discover
+                </button>
+                <button
+                  type="button"
+                  class="adder-tabs__tab"
+                  data-role="adder-tab"
+                  data-tab="add-sitemap"
+                  role="tab"
+                  aria-selected="false"
+                  data-i18n-key="adder.tab.addSitemap"
+                >
+                  Add Sitemap
+                </button>
+                <button
+                  type="button"
+                  class="adder-tabs__tab"
+                  data-role="adder-tab"
+                  data-tab="add-rss"
+                  role="tab"
+                  aria-selected="false"
+                  data-i18n-key="adder.tab.addRss"
+                >
+                  Add RSS
+                </button>
+              </div>
+
+              <div class="adder-tabs__panels">
+                <section
+                  class="adder finder"
+                  aria-live="polite"
+                  data-role="adder-panel"
+                  data-tab-panel="discover"
+                >
+                  <h2 class="adder__title" data-i18n-key="finder.title">Discover Sitemaps</h2>
+                  <p class="adder__description" data-i18n-key="finder.description">
+                    Scan a domain to detect sitemap or feed URLs automatically.
+                  </p>
+                  <form id="discoverForm" class="adder__form finder__form" autocomplete="off">
+                    <label class="adder__field finder__field">
+                      <span data-i18n-key="finder.field.domain">Domain or URL</span>
+                      <input
+                        id="discoverInput"
+                        class="adder__input"
+                        type="text"
+                        placeholder="example.com"
+                        data-i18n-attr="placeholder:finder.field.placeholder"
+                        required
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      id="discoverSubmit"
+                      class="adder__button finder__button"
+                      data-i18n-key="finder.submit"
+                    >
+                      Scan
+                    </button>
+                  </form>
+                  <div class="finder__status" id="discoverStatus" aria-live="polite">
+                    Enter a domain to start searching.
+                  </div>
+                  <div class="finder__results" id="discoverResults">
+                    <div id="discoverList" class="finder__list" aria-live="polite"></div>
+                    <div class="finder__actions" id="discoverActions">
+                      <button
+                        type="button"
+                        class="finder__action-button"
+                        id="discoverAddSelected"
+                        data-i18n-key="finder.addSelected"
+                        disabled
+                      >
+                        Add Selected
+                      </button>
+                      <button
+                        type="button"
+                        class="finder__action-button finder__action-button--ghost"
+                        id="discoverClear"
+                        data-i18n-key="finder.clear"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section
+                  class="adder"
+                  data-role="adder-panel"
+                  data-tab-panel="add-sitemap"
+                  hidden
+                  aria-hidden="true"
+                >
+                  <h2 class="adder__title" data-i18n-key="adder.title">Add Sitemap</h2>
+                  <form id="addForm" class="adder__form" autocomplete="off">
+                    <label class="adder__field">
+                      <span data-i18n-key="adder.field.title">Title</span>
+                      <input
+                        id="addTitle"
+                        class="adder__input"
+                        type="text"
+                        placeholder="Example: Blog Sitemap"
+                        data-i18n-attr="placeholder:adder.field.titlePlaceholder"
+                      />
+                    </label>
+                    <label class="adder__field">
+                      <span data-i18n-key="adder.field.url">URL</span>
+                      <input
+                        id="addUrl"
+                        class="adder__input"
+                        type="url"
+                        placeholder="https://site.com/sitemap.xml"
+                        data-i18n-attr="placeholder:adder.field.urlPlaceholder"
+                        required
+                      />
+                    </label>
+                    <button type="submit" class="adder__button" data-i18n-key="adder.submit">Add</button>
+                  </form>
+                </section>
+
+                <section
+                  class="adder adder--feed"
+                  data-role="adder-panel"
+                  data-tab-panel="add-rss"
+                  hidden
+                  aria-hidden="true"
+                >
+                  <h2 class="adder__title" data-i18n-key="adder.feedTitle">Add RSS Feed</h2>
+                  <p class="adder__description" data-i18n-key="adder.feedDescription">
+                    Track RSS/Atom feeds separately from sitemap URLs.
+                  </p>
+                  <form id="addFeedForm" class="adder__form" autocomplete="off">
+                    <label class="adder__field">
+                      <span data-i18n-key="adder.field.title">Title</span>
+                      <input
+                        id="addFeedTitle"
+                        class="adder__input"
+                        type="text"
+                        placeholder="Example: Breaking News Feed"
+                        data-i18n-attr="placeholder:adder.field.titlePlaceholder"
+                      />
+                    </label>
+                    <label class="adder__field">
+                      <span data-i18n-key="adder.field.url">URL</span>
+                      <input
+                        id="addFeedUrl"
+                        class="adder__input"
+                        type="url"
+                        placeholder="https://site.com/rss.xml"
+                        data-i18n-attr="placeholder:adder.feed.urlPlaceholder"
+                        required
+                      />
+                    </label>
+                    <button type="submit" class="adder__button" data-i18n-key="adder.feed.submit">
+                      Add Feed
+                    </button>
+                  </form>
+                </section>
+              </div>
+            </section>
+
+            <section class="table-wrapper">
+              <div class="table__controls">
+                <label class="table__page-size">
+                  <span data-i18n-key="table.pagination.perPage">Rows per page</span>
+                  <select class="table__select" id="tablePerPageSelect">
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </label>
+              </div>
+              <table class="table" id="sitemapTable">
+                <thead>
+                  <tr>
+                    <th scope="col" data-i18n-key="table.header.sitemap">Sitemap</th>
+                    <th scope="col" data-i18n-key="table.header.tags">Tags</th>
+                    <th scope="col" data-role="count-header" data-i18n-key="table.header.count">URL Count</th>
+                    <th scope="col" data-i18n-key="table.header.frequency">Refresh Rate</th>
+                    <th scope="col" data-i18n-key="table.header.lastUpdated">Last Updated</th>
+                    <th scope="col" data-i18n-key="table.header.actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+              <div class="details__pagination" id="tablePagination" style="display: none;">
+                <button type="button" class="details__pagination-button" id="tablePrevPage" disabled>
+                  <iconify-icon icon="mdi:chevron-left" width="16" height="16" aria-hidden="true"></iconify-icon>
+                  <span data-i18n-key="details.pagination.previous">Previous</span>
+                </button>
+                <div class="details__pagination-info" id="tablePaginationInfo">
+                  Showing 0-0 / 0 (Page 1 / 1)
+                </div>
+                <button type="button" class="details__pagination-button" id="tableNextPage" disabled>
+                  <span data-i18n-key="details.pagination.next">Next</span>
+                  <iconify-icon icon="mdi:chevron-right" width="16" height="16" aria-hidden="true"></iconify-icon>
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <section class="settings-page" id="settingsPage" hidden>
+            <header class="settings-page__header">
+              <h2 class="settings-page__title" data-i18n-key="settings.title">Brevo Email Settings</h2>
+              <p class="settings-page__description" data-i18n-key="settings.description">
+                Enter your Brevo API key and sender info. Leave blank if you do not want to update the key.
+              </p>
+            </header>
+
+            <form class="settings-card" id="brevoSettingsForm">
+              <div class="settings-card__field">
+                <label class="settings-card__label" for="languageSelect" data-i18n-key="language.label">
+                  Language
+                </label>
+                <div class="language-switcher">
+                  <select
+                    id="languageSelect"
+                    class="language-switcher__select"
+                    aria-label="Language"
+                    data-i18n-attr="aria-label:language.label"
+                  >
+                    <option value="en" data-i18n-key="language.option.en">English</option>
+                    <option value="tr" data-i18n-key="language.option.tr">Türkçe</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-card__field">
+                <label class="settings-card__label" for="brevoApiKeyInput" data-i18n-key="settings.apiKeyLabel">Brevo API Key</label>
+                <input
+                  type="password"
+                  id="brevoApiKeyInput"
+                  class="settings-card__input"
+                  placeholder="xkeysib-..."
+                  autocomplete="off"
+                />
+                <p class="settings-card__hint" data-i18n-key="settings.apiKeyHint">
+                  Existing key is kept unless you provide a new one.
+                </p>
+              </div>
+
+              <div class="settings-card__field">
+                <label class="settings-card__label" for="brevoSenderNameInput" data-i18n-key="settings.senderNameLabel">Sender Name</label>
+                <input
+                  type="text"
+                  id="brevoSenderNameInput"
+                  class="settings-card__input"
+                  placeholder="SitemapFlow"
+                  autocomplete="off"
+                />
+              </div>
+
+              <div class="settings-card__field">
+                <label class="settings-card__label" for="brevoSenderEmailInput" data-i18n-key="settings.senderEmailLabel">Sender Email</label>
+                <input
+                  type="email"
+                  id="brevoSenderEmailInput"
+                  class="settings-card__input"
+                  placeholder="ornek@domain.com"
+                  autocomplete="off"
+                  required
+                />
+              </div>
+
+              <div class="settings-card__footer">
+                <span class="settings-card__status" id="brevoStatus"></span>
+                <button
+                  type="button"
+                  class="settings-card__button settings-card__button--ghost"
+                  id="brevoTestButton"
+                  data-i18n-key="settings.testButton"
+                >
+                  Test API Key
+                </button>
+                <button type="submit" class="settings-card__button" data-i18n-key="settings.saveButton">
+                  Save
+                </button>
+              </div>
+            </form>
+          </section>
+        </main>
+
+        <aside class="details" id="detailsPanel">
+          <header class="details__header">
+            <h2 id="detailsTitle" data-i18n-key="details.title">Details</h2>
+            <div class="details__header-actions">
+              <button
+                type="button"
+                class="details__export-button details__action details__action--ghost"
+                id="detailsExportButton"
+                disabled
+                data-i18n-key="details.exportButton"
+              >
+                Export to Sheet
+              </button>
+              <button
+                type="button"
+                class="details__export-button details__action details__action--primary"
+                id="detailsScanButton"
+                disabled
+                data-i18n-key="details.scanButton"
+              >
+                Start Scan
+              </button>
+              <button
+                type="button"
+                class="details__export-button details__action details__action--ghost"
+                id="detailsPauseButton"
+                disabled
+                data-i18n-key="details.scanPauseButton"
+              >
+                Pause
+              </button>
+              <button
+                type="button"
+                class="details__export-button details__action details__action--danger"
+                id="detailsStopButton"
+                disabled
+                data-i18n-key="details.scanStopButton"
+              >
+                Stop
+              </button>
+            </div>
+            <div class="details__search">
+              <input
+                id="detailSearchInput"
+                class="details__search-input"
+                type="search"
+                placeholder="Search within URLs..."
+                data-i18n-attr="placeholder:details.searchPlaceholder"
+              />
+            </div>
+            <div class="details__filters">
+              <label class="details__filter">
+                <span data-i18n-key="details.filter.start">Start</span>
+                <input id="dateFrom" type="date" />
+              </label>
+              <label class="details__filter">
+                <span data-i18n-key="details.filter.end">End</span>
+                <input id="dateTo" type="date" />
+              </label>
+            </div>
+            <div
+              class="details__tabs"
+              role="tablist"
+              aria-label="Details tabs"
+              data-i18n-attr="aria-label:details.tabs.aria"
+            >
+              <button
+                type="button"
+                class="details__tab details__tab--active"
+                data-role="details-tab"
+                data-tab="urls"
+                data-i18n-key="details.tab.urls"
+              >
+                URL List
+              </button>
+              <button
+                type="button"
+                class="details__tab"
+                data-role="details-tab"
+                data-tab="discovery"
+                data-i18n-key="details.tab.discovery"
+              >
+                Discovery
+              </button>
+            </div>
+          </header>
+          <section class="details-groups" aria-label="URL groups" data-i18n-attr="aria-label:details.groups">
+            <span class="details-groups__label" data-i18n-key="details.groupLabel">URL Group</span>
+            <nav class="details-groups__list" id="detailsPrefixFilter"></nav>
+            <div class="details-groups__more">
+              <button
+                type="button"
+                class="details-groups__more-trigger"
+                id="detailsPrefixMore"
+                aria-expanded="false"
+                aria-haspopup="true"
+                data-i18n-key="details.more"
+              >
+                Show more
+                <iconify-icon icon="mdi:chevron-down" width="18" height="18" aria-hidden="true"></iconify-icon>
+              </button>
+              <div
+                class="details-groups__popover"
+                id="detailsPrefixPopover"
+                role="menu"
+                aria-hidden="true"
+                aria-labelledby="detailsPrefixMore"
+              ></div>
+            </div>
+          </section>
+          <section
+            class="details-groups"
+            id="detailsIssueSection"
+            aria-label="Issue groups"
+            data-i18n-attr="aria-label:details.issues.groups"
+          >
+            <span class="details-groups__label" data-i18n-key="details.issues.label">Issue Group</span>
+            <nav class="details-groups__list" id="detailsIssueFilter"></nav>
+          </section>
+          <div class="details__discovery-controls" id="detailsDiscoveryControls" hidden>
+            <label class="details__filter details__filter--range">
+              <span data-i18n-key="details.discovery.threshold">Threshold</span>
+              <div class="details__range">
+                <input id="detailsSimilarityThreshold" type="range" min="0.6" max="0.95" step="0.01" />
+                <span class="details__range-value" id="detailsSimilarityThresholdValue">0.80</span>
+              </div>
+            </label>
+            <label class="details__filter">
+              <span data-i18n-key="details.discovery.minCluster">Min cluster size</span>
+              <input id="detailsSimilarityMinCluster" type="number" min="2" max="50" step="1" />
+            </label>
+            <button
+              type="button"
+              class="details__action-button"
+              id="detailsDiscoveryApply"
+              data-i18n-key="details.discovery.apply"
+            >
+              Apply
+            </button>
+          </div>
+          <p class="details__status" id="detailsStatus" data-i18n-key="details.status.idle">
+            Select a sitemap to browse its URL list.
+          </p>
+          <p class="details__status details__status--subtle" id="detailsFetchNote" hidden></p>
+          <p class="details__status" id="detailsDiscoveryStatus" data-i18n-key="details.discovery.status.idle" hidden>
+            Select a sitemap to analyze similarity clusters.
+          </p>
+          <div id="detailsUrlPanel">
+            
+            <div class="details-compare__bar" id="detailsCompareBar" hidden>
+              <div class="details-compare__bar-list" id="detailsCompareBarList"></div>
+              <button
+                type="button"
+                class="details-compare__bar-button"
+                id="detailsCompareBarButton"
+                data-i18n-key="details.compare.cta.waiting"
+                disabled
+              >
+                Select 2 URLs to compare
+              </button>
+            </div>
+            <div class="details__chart-container" id="detailsChartContainer" style="display: none;">
+              <div class="details__chart-header">
+                <h3 class="details__chart-title" id="detailsChartTitle" data-i18n-key="details.chart.title">
+                  Last 7 Days of Updates
+                </h3>
+                <div class="details__chart-filters">
+                  <button
+                    type="button"
+                    class="details__chart-filter details__chart-filter--active"
+                    data-days="7"
+                    data-i18n-key="details.chart.days7"
+                  >
+                    7 Days
+                  </button>
+                  <button
+                    type="button"
+                    class="details__chart-filter"
+                    data-days="14"
+                    data-i18n-key="details.chart.days14"
+                  >
+                    14 Days
+                  </button>
+                  <button
+                    type="button"
+                    class="details__chart-filter"
+                    data-days="30"
+                    data-i18n-key="details.chart.days30"
+                  >
+                    30 Days
+                  </button>
+                </div>
+              </div>
+              <canvas id="detailsChart"></canvas>
+            </div>
+            <div class="details__wrapper">
+              <table class="table details__table" id="detailsTable">
+                <thead>
+                  <tr>
+                    <th scope="col" data-role="details-link" data-i18n-key="details.table.link">URL</th>
+                    <th scope="col" data-i18n-key="details.table.count200">200</th>
+                    <th scope="col" data-i18n-key="details.table.count301">301</th>
+                    <th scope="col" data-i18n-key="details.table.count404">404</th>
+                    <th scope="col" data-i18n-key="details.table.count4xx">4xx</th>
+                    <th scope="col" data-i18n-key="details.table.count500">500</th>
+                    <th scope="col" data-i18n-key="details.table.countOther">Other</th>
+                    <th scope="col" data-i18n-key="details.table.score">Score</th>
+                    <th scope="col" data-i18n-key="details.table.lastCrawl">Last Crawl</th>
+                    <th scope="col" data-role="details-date" data-i18n-key="details.table.lastUpdated">Last Updated</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="details__pagination" id="detailsPagination" style="display: none;">
+              <button type="button" class="details__pagination-button" id="detailsPrevPage" disabled>
+                <iconify-icon icon="mdi:chevron-left" width="18" height="18" aria-hidden="true"></iconify-icon>
+                <span data-i18n-key="details.pagination.previous">Previous</span>
+              </button>
+              <div class="details__pagination-info" id="detailsPaginationInfo" data-i18n-key="details.pagination.info">
+                Page 1 / 1
+              </div>
+              <button type="button" class="details__pagination-button" id="detailsNextPage" disabled>
+                <span data-i18n-key="details.pagination.next">Next</span>
+                <iconify-icon icon="mdi:chevron-right" width="18" height="18" aria-hidden="true"></iconify-icon>
+              </button>
+            </div>
+          </div>
+          <div class="details__discovery" id="detailsDiscoveryPanel" hidden>
+            <div class="details__discovery-spinner" id="detailsDiscoverySpinner" hidden>
+              <span class="details__spinner" aria-hidden="true"></span>
+            </div>
+            <div class="details__discovery-summary" id="detailsDiscoverySummary"></div>
+            <div class="details__discovery-list" id="detailsDiscoveryList"></div>
+          </div>
+        </aside>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js" defer></script>
+    <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+    <div class="details-compare__modal" id="detailsCompareModal" hidden>
+      <div class="details-compare__modal-dialog" id="detailsCompareModalContent">
+        <div class="details-compare__modal-header">
+          <h3 class="details-compare__title" data-i18n-key="details.compare.title">
+            Compare URLs
+          </h3>
+          <div class="details-compare__modal-actions">
+            <button
+              type="button"
+              class="details-compare__clear"
+              id="detailsCompareClear"
+              data-i18n-key="details.compare.clear"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              class="details-compare__close"
+              id="detailsCompareClose"
+              data-i18n-key="details.compare.close"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        <div class="details-compare__cards" id="detailsCompareCards"></div>
+        <div class="details-compare__summary" id="detailsCompareSummary"></div>
+      </div>
+    </div>
+  </body>
+</html>
+
+
+
+
+
+
+
+
