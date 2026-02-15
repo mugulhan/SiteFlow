@@ -186,6 +186,19 @@
               <span data-i18n-key="nav.settings">Settings</span>
             </button>
           </nav>
+          <section
+            class="sidebar__watchlist"
+            aria-label="Watched pages"
+            data-i18n-attr="aria-label:sidebar.watch.title"
+          >
+            <div class="sidebar__watchlist-header">
+              <span class="sidebar__watchlist-title" data-i18n-key="sidebar.watch.title">Watched Pages</span>
+              <span class="sidebar__watchlist-count" id="sidebarWatchCount">0</span>
+            </div>
+            <div class="sidebar__watchlist-list" id="sidebarWatchList">
+              <p class="sidebar__watchlist-empty" data-i18n-key="sidebar.watch.loading">Loading watch list...</p>
+            </div>
+          </section>
           <div class="sidebar__actions" role="group" aria-label="Account actions">
             <button class="sidebar__link sidebar__link--ghost" type="button">
               <iconify-icon
@@ -928,7 +941,6 @@
     </div>
   </body>
 </html>
-
 
 
 

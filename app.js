@@ -16,6 +16,9 @@ const API_SCAN_LATEST_ENDPOINT = "/api/scans/latest";
 const API_SCAN_LAST_ENDPOINT = "/api/scans/last";
 const API_SCAN_NOTIFICATIONS_ENDPOINT = "/api/scans/notifications";
 const API_SCAN_NOTIFICATIONS_READ_ALL_ENDPOINT = "/api/scans/notifications/read-all";
+const API_WATCHES_ENDPOINT = "/api/watches";
+const API_WATCH_DIFFS_ENDPOINT = "/api/watches/unread-diffs";
+const API_WATCH_DIFFS_MARK_ALL_ENDPOINT = "/api/watches/diffs/mark-all-read";
 const CLIENT_FETCH_TIMEOUT_MS = 35000;
 const METADATA_CONCURRENCY_LIMIT = 5;
 const SCAN_PROGRESS_FLUSH_MS = 4000;
@@ -45,6 +48,10 @@ const I18N_STRINGS = {
     "nav.settings": "Settings",
     "nav.logout": "Sign Out",
     "nav.menu": "Main menu",
+    "sidebar.watch.title": "Watched Pages",
+    "sidebar.watch.empty": "No watched pages yet.",
+    "sidebar.watch.loading": "Loading watch list...",
+    "sidebar.watch.meta.updated": "Updated {time}",
     "controls.filter": "Filter",
     "controls.searchPlaceholder": "Search by URL or title",
     "controls.refresh": "Refresh",
@@ -277,6 +284,9 @@ const I18N_STRINGS = {
     "details.actions.openUrl": "Open URL",
     "details.actions.copyUrl": "Copy URL",
     "details.actions.compareAdd": "Add to compare",
+    "details.actions.watchEnable": "Watch page",
+    "details.actions.watchDisable": "Stop watching page",
+    "details.actions.watchPending": "Updating watch",
     "details.actions.linkMapBuild": "Build link map",
     "details.actions.linkMapCancel": "Cancel link map",
     "details.actions.linkMapExport": "Export link map",
@@ -302,6 +312,10 @@ const I18N_STRINGS = {
     "details.toast.copySuccess": "URL copied to clipboard.",
     "details.toast.copyFail": "Could not copy URL.",
     "details.toast.openFail": "Could not open URL.",
+    "details.watch.enabled": "Page added to watch list.",
+    "details.watch.disabled": "Page removed from watch list.",
+    "details.watch.error": "Watch action failed: {error}",
+    "details.watch.loadError": "Watch list could not be loaded.",
     "details.compare.title": "Compare URLs",
     "details.compare.clear": "Clear",
     "details.compare.remove": "Remove",
@@ -321,9 +335,8 @@ const I18N_STRINGS = {
     "details.compare.schema.present": "Present in selected pages",
     "details.compare.schema.none": "No schema type data.",
     "details.compare.content.title": "Content (P) Diff",
-    "details.compare.content.summary": "+{added} / -{removed} (same: {same})",
-    "details.compare.content.added": "Added",
-    "details.compare.content.removed": "Removed",
+    "details.compare.content.summaryDual": "{left}: {leftOnly} | {right}: {rightOnly} (same: {same})",
+    "details.compare.content.uniqueLabel": "Only in {label}",
     "details.compare.content.none": "No paragraph changes.",
     "details.compare.content.more": "{count} more...",
     "details.compare.cta.ready": "Compare",
@@ -364,6 +377,32 @@ const I18N_STRINGS = {
     "notification.center.severity.medium": "Medium",
     "notification.center.severity.low": "Info",
     "notification.center.relative.now": "just now",
+    "notification.center.source.scan": "Scan",
+    "notification.center.source.watch": "Watch",
+    "notification.watch.title.critical": "Critical page change detected",
+    "notification.watch.title.major": "Page content changed",
+    "notification.watch.title.minor": "Minor page change detected",
+    "notification.watch.message.template": "{url} • {changes}",
+    "notification.watch.changes.none": "Change details available",
+    "notification.watch.changes.title": "title",
+    "notification.watch.changes.description": "description",
+    "notification.watch.changes.headings": "headings",
+    "notification.watch.changes.content": "content",
+    "notification.watch.modal.title": "Watched Page Diff",
+    "notification.watch.modal.close": "Close",
+    "notification.watch.modal.openPage": "Open page",
+    "notification.watch.modal.status.from": "Previous",
+    "notification.watch.modal.status.to": "Current",
+    "notification.watch.modal.section.title": "Title",
+    "notification.watch.modal.section.description": "Description",
+    "notification.watch.modal.section.headings": "Headings",
+    "notification.watch.modal.section.content": "Content",
+    "notification.watch.modal.empty": "No diff details available.",
+    "notification.watch.modal.added": "Added",
+    "notification.watch.modal.removed": "Removed",
+    "notification.watch.modal.wordDelta": "Word delta: {value}",
+    "notification.watch.modal.contentStats": "{percent}% changed • +{added} / -{removed}",
+    "notification.watch.modal.error": "Diff details could not be loaded.",
     "email.settings.info": "Add one email address per line.",
     "email.settings.toggle": "Email notifications active",
     "email.settings.save": "Save",
@@ -386,6 +425,10 @@ const I18N_STRINGS = {
     "nav.settings": "Ayarlar",
     "nav.logout": "\\u00C7\\u0131k\\u0131\\u015F Yap",
     "nav.menu": "Ana men\u00FC",
+    "sidebar.watch.title": "Takip Edilen Sayfalar",
+    "sidebar.watch.empty": "Henuz takip edilen sayfa yok.",
+    "sidebar.watch.loading": "Takip listesi yukleniyor...",
+    "sidebar.watch.meta.updated": "Guncelleme: {time}",
     "controls.filter": "Filtrele",
     "controls.searchPlaceholder": "URL veya ba\u015Fl\u0131k ara",
     "controls.refresh": "Yenile",
@@ -534,6 +577,9 @@ const I18N_STRINGS = {
     "details.actions.openUrl": "URL'yi ac",
     "details.actions.copyUrl": "URL kopyala",
     "details.actions.compareAdd": "Karsilastirmaya ekle",
+    "details.actions.watchEnable": "Sayfayi takibe al",
+    "details.actions.watchDisable": "Sayfa takibini kaldir",
+    "details.actions.watchPending": "Takip guncelleniyor",
     "details.actions.linkMapBuild": "Link haritasi olustur",
     "details.actions.linkMapCancel": "Link haritasi iptal et",
     "details.actions.linkMapExport": "Link haritasini disa aktar",
@@ -559,6 +605,10 @@ const I18N_STRINGS = {
     "details.toast.copySuccess": "URL panoya kopyalandi.",
     "details.toast.copyFail": "URL kopyalanamadi.",
     "details.toast.openFail": "URL acilamadi.",
+    "details.watch.enabled": "Sayfa takibe alindi.",
+    "details.watch.disabled": "Sayfa takibi kaldirildi.",
+    "details.watch.error": "Takip islemi basarisiz: {error}",
+    "details.watch.loadError": "Takip listesi yuklenemedi.",
     "details.compare.title": "URL karsilastirma",
     "details.compare.clear": "Temizle",
     "details.compare.remove": "Kaldir",
@@ -578,9 +628,8 @@ const I18N_STRINGS = {
     "details.compare.schema.present": "Secili sayfalarda mevcut",
     "details.compare.schema.none": "Schema tipi verisi yok.",
     "details.compare.content.title": "Icerik (P) Farki",
-    "details.compare.content.summary": "+{added} / -{removed} (ayni: {same})",
-    "details.compare.content.added": "Eklenen",
-    "details.compare.content.removed": "Kaldirilan",
+    "details.compare.content.summaryDual": "{left}: {leftOnly} | {right}: {rightOnly} (ayni: {same})",
+    "details.compare.content.uniqueLabel": "Yalnizca {label} icinde",
     "details.compare.content.none": "Paragraf degisikligi yok.",
     "details.compare.content.more": "{count} tane daha...",
     "details.compare.cta.ready": "Karsilastir",
@@ -651,6 +700,32 @@ const I18N_STRINGS = {
     "notification.center.severity.medium": "Uyari",
     "notification.center.severity.low": "Bilgi",
     "notification.center.relative.now": "simdi",
+    "notification.center.source.scan": "Tarama",
+    "notification.center.source.watch": "Takip",
+    "notification.watch.title.critical": "Kritik sayfa degisikligi algilandi",
+    "notification.watch.title.major": "Sayfa icerigi degisti",
+    "notification.watch.title.minor": "Kucuk sayfa degisikligi algilandi",
+    "notification.watch.message.template": "{url} • {changes}",
+    "notification.watch.changes.none": "Degisiklik detaylari hazir",
+    "notification.watch.changes.title": "baslik",
+    "notification.watch.changes.description": "aciklama",
+    "notification.watch.changes.headings": "basliklar",
+    "notification.watch.changes.content": "icerik",
+    "notification.watch.modal.title": "Takipli Sayfa Farki",
+    "notification.watch.modal.close": "Kapat",
+    "notification.watch.modal.openPage": "Sayfayi ac",
+    "notification.watch.modal.status.from": "Onceki",
+    "notification.watch.modal.status.to": "Guncel",
+    "notification.watch.modal.section.title": "Baslik",
+    "notification.watch.modal.section.description": "Aciklama",
+    "notification.watch.modal.section.headings": "Basliklar",
+    "notification.watch.modal.section.content": "Icerik",
+    "notification.watch.modal.empty": "Diff detayi bulunamadi.",
+    "notification.watch.modal.added": "Eklenen",
+    "notification.watch.modal.removed": "Kaldirilan",
+    "notification.watch.modal.wordDelta": "Kelime farki: {value}",
+    "notification.watch.modal.contentStats": "%{percent} degisim • +{added} / -{removed}",
+    "notification.watch.modal.error": "Diff detaylari yuklenemedi.",
     "email.settings.info": "Her sat\u0131ra bir e-posta adresi olacak \u015Fekilde al\u0131c\u0131lar\u0131 ekleyin.",
     "email.settings.toggle": "E-posta bildirimleri aktif",
     "email.settings.save": "Kaydet",
@@ -982,6 +1057,7 @@ function initializeLanguageSwitcher() {
     renderTagMenu();
     renderTable();
     renderDetails();
+    renderSidebarWatchList();
     languageSelect.value = currentLanguage;
   });
 }
@@ -1369,7 +1445,11 @@ const state = {
     senderName: "",
   },
   emailEditUrl: null,
+  sidebarWatches: [],
+  sidebarWatchesLoading: false,
   detailMetadata: new Map(),
+  detailWatchesByUrl: new Map(),
+  detailWatchPending: new Set(),
   linkMapBySitemap: new Map(),
   linkMapLoading: new Set(),
   linkMapChecked: new Set(),
@@ -2105,21 +2185,25 @@ const scanNotificationCenter = (() => {
   const limit = 25;
   let pollerId = null;
   let isLoading = false;
+  let watchDiffModal = null;
 
   function severityClass(severity) {
     const safe = String(severity || "").toLowerCase();
-    if (safe === "high") {
+    if (safe === "high" || safe === "critical") {
       return "high";
     }
-    if (safe === "medium") {
+    if (safe === "medium" || safe === "major") {
       return "medium";
     }
     return "low";
   }
 
   function severityLabel(severity) {
-    const safe = severityClass(severity);
-    return t(`notification.center.severity.${safe}`);
+    return t(`notification.center.severity.${severityClass(severity)}`);
+  }
+
+  function sourceLabel(source) {
+    return t(`notification.center.source.${source === "watch" ? "watch" : "scan"}`);
   }
 
   function formatRelativeTime(value) {
@@ -2149,7 +2233,57 @@ const scanNotificationCenter = (() => {
     return `${diffDay}d`;
   }
 
-  function normalizeNotification(item) {
+  function formatNotificationUrl(value) {
+    if (!value || typeof value !== "string") {
+      return "";
+    }
+    try {
+      const parsed = new URL(value);
+      const label = `${parsed.hostname}${parsed.pathname || "/"}`;
+      return label.length <= 58 ? label : `${label.slice(0, 55)}...`;
+    } catch (_error) {
+      const text = value.trim();
+      return text.length <= 58 ? text : `${text.slice(0, 55)}...`;
+    }
+  }
+
+  function buildWatchChangeSummary(summary) {
+    const safe = summary && typeof summary === "object" ? summary : null;
+    if (!safe) {
+      return t("notification.watch.changes.none");
+    }
+    const tokens = [];
+    if (safe.titleChanged) {
+      tokens.push(t("notification.watch.changes.title"));
+    }
+    if (safe.descriptionChanged) {
+      tokens.push(t("notification.watch.changes.description"));
+    }
+    const headingAdded = Number(safe?.headingChanges?.addedCount) || 0;
+    const headingRemoved = Number(safe?.headingChanges?.removedCount) || 0;
+    if (headingAdded > 0 || headingRemoved > 0) {
+      tokens.push(t("notification.watch.changes.headings"));
+    }
+    const paragraphAdded = Number(safe?.paragraphChanges?.addedCount) || 0;
+    const paragraphRemoved = Number(safe?.paragraphChanges?.removedCount) || 0;
+    if (paragraphAdded > 0 || paragraphRemoved > 0) {
+      tokens.push(t("notification.watch.changes.content"));
+    }
+    return tokens.length ? tokens.join(", ") : t("notification.watch.changes.none");
+  }
+
+  function buildWatchTitle(severity) {
+    const safe = String(severity || "").toLowerCase();
+    if (safe === "critical") {
+      return t("notification.watch.title.critical");
+    }
+    if (safe === "major") {
+      return t("notification.watch.title.major");
+    }
+    return t("notification.watch.title.minor");
+  }
+
+  function normalizeScanNotification(item) {
     if (!item || typeof item !== "object") {
       return null;
     }
@@ -2158,12 +2292,17 @@ const scanNotificationCenter = (() => {
       return null;
     }
     return {
-      id: parsedId,
+      id: `scan:${parsedId}`,
+      source: "scan",
+      rawId: parsedId,
       sitemapUrl: typeof item.sitemapUrl === "string" ? item.sitemapUrl : "",
+      watchId: null,
+      watchUrl: "",
       runId: Number.isFinite(Number(item.runId)) ? Number(item.runId) : null,
       diffId: Number.isFinite(Number(item.diffId)) ? Number(item.diffId) : null,
       type: typeof item.type === "string" ? item.type : "",
       severity: severityClass(item.severity),
+      watchSeverity: null,
       title: item.title || "",
       message: item.message || "",
       payload: item.payload && typeof item.payload === "object" ? item.payload : null,
@@ -2171,6 +2310,60 @@ const scanNotificationCenter = (() => {
       createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
       readAt: typeof item.readAt === "string" ? item.readAt : null,
     };
+  }
+
+  function normalizeWatchDiffNotification(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    const parsedId = Number(item.id);
+    const parsedWatchId = Number(item.watchId);
+    if (!Number.isFinite(parsedId) || !Number.isFinite(parsedWatchId)) {
+      return null;
+    }
+
+    const summary = item.summary && typeof item.summary === "object" ? item.summary : null;
+    const watchSeverity = typeof item.severity === "string" ? item.severity.toLowerCase() : "minor";
+    const safeUrl = typeof item.url === "string" ? item.url : "";
+    const shortUrl = formatNotificationUrl(safeUrl) || safeUrl || "-";
+
+    return {
+      id: `watch:${parsedId}`,
+      source: "watch",
+      rawId: parsedId,
+      sitemapUrl: typeof item.sitemapUrl === "string" ? item.sitemapUrl : "",
+      watchId: parsedWatchId,
+      watchUrl: safeUrl,
+      runId: null,
+      diffId: parsedId,
+      type: "watch_diff",
+      severity: severityClass(watchSeverity),
+      watchSeverity,
+      title: buildWatchTitle(watchSeverity),
+      message: t("notification.watch.message.template", {
+        url: shortUrl,
+        changes: buildWatchChangeSummary(summary),
+      }),
+      payload: {
+        summary,
+        prevSnapshotId: Number.isFinite(Number(item.prevSnapshotId)) ? Number(item.prevSnapshotId) : null,
+        currSnapshotId: Number.isFinite(Number(item.currSnapshotId)) ? Number(item.currSnapshotId) : null,
+        prevFetchedAt: typeof item.prevFetchedAt === "string" ? item.prevFetchedAt : null,
+        currFetchedAt: typeof item.currFetchedAt === "string" ? item.currFetchedAt : null,
+      },
+      isRead: Boolean(item.isNotified),
+      createdAt: typeof item.detectedAt === "string" ? item.detectedAt : "",
+      readAt: typeof item.notifiedAt === "string" ? item.notifiedAt : null,
+    };
+  }
+
+  function compareNotifications(a, b) {
+    const aTs = Date.parse(a?.createdAt || "") || 0;
+    const bTs = Date.parse(b?.createdAt || "") || 0;
+    if (aTs !== bTs) {
+      return bTs - aTs;
+    }
+    return String(b?.id || "").localeCompare(String(a?.id || ""));
   }
 
   function setPanelOpen(open) {
@@ -2204,6 +2397,379 @@ const scanNotificationCenter = (() => {
     scanNotificationReadAll.disabled = (Number(state.notificationCenter.unreadCount) || 0) === 0;
   }
 
+  function ensureWatchDiffModal() {
+    if (watchDiffModal) {
+      return watchDiffModal;
+    }
+
+    const container = document.createElement("div");
+    container.id = "watchDiffModal";
+    container.classList.add("watch-diff-modal");
+    container.hidden = true;
+
+    const backdrop = document.createElement("div");
+    backdrop.classList.add("watch-diff-modal__backdrop");
+    backdrop.dataset.role = "watch-diff-close";
+
+    const dialog = document.createElement("div");
+    dialog.classList.add("watch-diff-modal__dialog");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "watchDiffModalTitle");
+
+    const header = document.createElement("header");
+    header.classList.add("watch-diff-modal__header");
+
+    const headerMain = document.createElement("div");
+    headerMain.classList.add("watch-diff-modal__header-main");
+
+    const title = document.createElement("h3");
+    title.id = "watchDiffModalTitle";
+    title.classList.add("watch-diff-modal__title");
+    title.textContent = t("notification.watch.modal.title");
+
+    const link = document.createElement("a");
+    link.id = "watchDiffModalLink";
+    link.classList.add("watch-diff-modal__link");
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.href = "#";
+
+    const meta = document.createElement("p");
+    meta.id = "watchDiffModalMeta";
+    meta.classList.add("watch-diff-modal__meta");
+
+    headerMain.append(title, link, meta);
+
+    const headerRight = document.createElement("div");
+    headerRight.classList.add("watch-diff-modal__header-right");
+
+    const severity = document.createElement("span");
+    severity.id = "watchDiffModalSeverity";
+    severity.classList.add("watch-diff-modal__severity", "watch-diff-modal__severity--low");
+    severity.textContent = severityLabel("low");
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.classList.add("watch-diff-modal__close");
+    close.dataset.role = "watch-diff-close";
+    close.setAttribute("aria-label", t("notification.watch.modal.close"));
+    close.appendChild(createIcon("mdi:close", 18));
+
+    headerRight.append(severity, close);
+    header.append(headerMain, headerRight);
+
+    const body = document.createElement("div");
+    body.id = "watchDiffModalBody";
+    body.classList.add("watch-diff-modal__body");
+
+    const footer = document.createElement("footer");
+    footer.classList.add("watch-diff-modal__footer");
+
+    const closeFooter = document.createElement("button");
+    closeFooter.type = "button";
+    closeFooter.classList.add("watch-diff-modal__button", "watch-diff-modal__button--ghost");
+    closeFooter.dataset.role = "watch-diff-close";
+    closeFooter.textContent = t("notification.watch.modal.close");
+
+    const openPage = document.createElement("a");
+    openPage.id = "watchDiffModalOpenPage";
+    openPage.classList.add("watch-diff-modal__button");
+    openPage.target = "_blank";
+    openPage.rel = "noopener noreferrer";
+    openPage.href = "#";
+    openPage.textContent = t("notification.watch.modal.openPage");
+
+    footer.append(closeFooter, openPage);
+    dialog.append(header, body, footer);
+    container.append(backdrop, dialog);
+    document.body.appendChild(container);
+
+    const setOpen = (open) => {
+      const shouldOpen = Boolean(open);
+      container.hidden = !shouldOpen;
+      document.body.classList.toggle("modal-open", shouldOpen);
+    };
+
+    container.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      if (target.dataset.role === "watch-diff-close") {
+        setOpen(false);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !container.hidden) {
+        setOpen(false);
+      }
+    });
+
+    watchDiffModal = {
+      container,
+      title,
+      link,
+      meta,
+      severity,
+      body,
+      openPage,
+      setOpen,
+    };
+    return watchDiffModal;
+  }
+
+  function buildCompareBlock(label, beforeValue, afterValue) {
+    const wrapper = document.createElement("section");
+    wrapper.classList.add("watch-diff-modal__section");
+
+    const heading = document.createElement("h4");
+    heading.classList.add("watch-diff-modal__section-title");
+    heading.textContent = label;
+    wrapper.appendChild(heading);
+
+    const compare = document.createElement("div");
+    compare.classList.add("watch-diff-modal__compare");
+
+    const before = document.createElement("div");
+    before.classList.add("watch-diff-modal__value", "watch-diff-modal__value--removed");
+    const beforeLabel = document.createElement("span");
+    beforeLabel.classList.add("watch-diff-modal__value-label");
+    beforeLabel.textContent = t("notification.watch.modal.status.from");
+    const beforeText = document.createElement("p");
+    beforeText.textContent = beforeValue || "-";
+    before.append(beforeLabel, beforeText);
+
+    const after = document.createElement("div");
+    after.classList.add("watch-diff-modal__value", "watch-diff-modal__value--added");
+    const afterLabel = document.createElement("span");
+    afterLabel.classList.add("watch-diff-modal__value-label");
+    afterLabel.textContent = t("notification.watch.modal.status.to");
+    const afterText = document.createElement("p");
+    afterText.textContent = afterValue || "-";
+    after.append(afterLabel, afterText);
+
+    compare.append(before, after);
+    wrapper.appendChild(compare);
+    return wrapper;
+  }
+
+  function buildChangeList(label, items, tone) {
+    const section = document.createElement("div");
+    section.classList.add("watch-diff-modal__change-group");
+
+    const title = document.createElement("p");
+    title.classList.add("watch-diff-modal__change-label");
+    title.textContent = label;
+    section.appendChild(title);
+
+    const list = document.createElement("ul");
+    list.classList.add("watch-diff-modal__change-list");
+    const values = Array.isArray(items) ? items.filter((item) => typeof item === "string" && item.trim()) : [];
+    if (!values.length) {
+      const empty = document.createElement("li");
+      empty.classList.add("watch-diff-modal__change-item", `watch-diff-modal__change-item--${tone}`);
+      empty.textContent = "-";
+      list.appendChild(empty);
+    } else {
+      values.slice(0, 8).forEach((item) => {
+        const li = document.createElement("li");
+        li.classList.add("watch-diff-modal__change-item", `watch-diff-modal__change-item--${tone}`);
+        li.textContent = item;
+        list.appendChild(li);
+      });
+    }
+    section.appendChild(list);
+    return section;
+  }
+
+  function setDiffModalLoading(item) {
+    const modal = ensureWatchDiffModal();
+    modal.title.textContent = t("notification.watch.modal.title");
+    const pageUrl = item?.watchUrl || "";
+    modal.link.href = pageUrl || "#";
+    modal.link.textContent = formatNotificationUrl(pageUrl) || pageUrl || "-";
+    modal.meta.textContent = formatDateTime(item?.createdAt || "");
+    modal.severity.className = `watch-diff-modal__severity watch-diff-modal__severity--${severityClass(
+      item?.watchSeverity || item?.severity
+    )}`;
+    modal.severity.textContent = severityLabel(item?.watchSeverity || item?.severity || "low");
+    modal.openPage.href = pageUrl || "#";
+    modal.openPage.textContent = t("notification.watch.modal.openPage");
+    modal.body.innerHTML = "";
+    const loading = document.createElement("p");
+    loading.classList.add("watch-diff-modal__empty");
+    loading.textContent = `${t("controls.refreshLoading")}`;
+    modal.body.appendChild(loading);
+    modal.setOpen(true);
+  }
+
+  function renderWatchDiffModal(item, payload) {
+    const modal = ensureWatchDiffModal();
+    const summary =
+      payload && payload.summary && typeof payload.summary === "object"
+        ? payload.summary
+        : item?.payload?.summary && typeof item.payload.summary === "object"
+        ? item.payload.summary
+        : null;
+    const previousSnapshot = payload && payload.previousSnapshot ? payload.previousSnapshot : null;
+    const currentSnapshot = payload && payload.currentSnapshot ? payload.currentSnapshot : null;
+    const previousMetadata = previousSnapshot?.metadata || {};
+    const currentMetadata = currentSnapshot?.metadata || {};
+    const pageUrl = item?.watchUrl || "";
+
+    modal.title.textContent = t("notification.watch.modal.title");
+    modal.link.href = pageUrl || "#";
+    modal.link.textContent = formatNotificationUrl(pageUrl) || pageUrl || "-";
+    modal.openPage.href = pageUrl || "#";
+    modal.openPage.textContent = t("notification.watch.modal.openPage");
+
+    const fromTime = previousSnapshot?.fetchedAt || item?.payload?.prevFetchedAt || "";
+    const toTime = currentSnapshot?.fetchedAt || item?.payload?.currFetchedAt || item?.createdAt || "";
+    modal.meta.textContent = `${t("notification.watch.modal.status.from")}: ${
+      fromTime ? formatDateTime(fromTime) : "-"
+    } | ${t("notification.watch.modal.status.to")}: ${toTime ? formatDateTime(toTime) : "-"}`;
+
+    const severityToken =
+      item?.watchSeverity ||
+      (typeof payload?.severity === "string" ? payload.severity : "") ||
+      (typeof summary?.severity === "string" ? summary.severity : "minor");
+    const safeSeverity = severityClass(severityToken);
+    modal.severity.className = `watch-diff-modal__severity watch-diff-modal__severity--${safeSeverity}`;
+    modal.severity.textContent = severityLabel(safeSeverity);
+
+    modal.body.innerHTML = "";
+    let hasSection = false;
+
+    const previousTitle = typeof previousMetadata.title === "string" ? previousMetadata.title : "";
+    const currentTitle = typeof currentMetadata.title === "string" ? currentMetadata.title : "";
+    if (summary?.titleChanged || (previousTitle || currentTitle) && previousTitle !== currentTitle) {
+      modal.body.appendChild(
+        buildCompareBlock(t("notification.watch.modal.section.title"), previousTitle, currentTitle)
+      );
+      hasSection = true;
+    }
+
+    const previousDescription =
+      typeof previousMetadata.description === "string" ? previousMetadata.description : "";
+    const currentDescription =
+      typeof currentMetadata.description === "string" ? currentMetadata.description : "";
+    if (
+      summary?.descriptionChanged ||
+      (previousDescription || currentDescription) && previousDescription !== currentDescription
+    ) {
+      modal.body.appendChild(
+        buildCompareBlock(
+          t("notification.watch.modal.section.description"),
+          previousDescription,
+          currentDescription
+        )
+      );
+      hasSection = true;
+    }
+
+    const headingAdded = Array.isArray(summary?.headingChanges?.added) ? summary.headingChanges.added : [];
+    const headingRemoved = Array.isArray(summary?.headingChanges?.removed) ? summary.headingChanges.removed : [];
+    if (headingAdded.length || headingRemoved.length) {
+      const section = document.createElement("section");
+      section.classList.add("watch-diff-modal__section");
+      const heading = document.createElement("h4");
+      heading.classList.add("watch-diff-modal__section-title");
+      heading.textContent = t("notification.watch.modal.section.headings");
+      section.appendChild(heading);
+      const groups = document.createElement("div");
+      groups.classList.add("watch-diff-modal__changes");
+      groups.appendChild(buildChangeList(t("notification.watch.modal.added"), headingAdded, "added"));
+      groups.appendChild(buildChangeList(t("notification.watch.modal.removed"), headingRemoved, "removed"));
+      section.appendChild(groups);
+      modal.body.appendChild(section);
+      hasSection = true;
+    }
+
+    const paragraphAdded = Array.isArray(summary?.paragraphChanges?.added) ? summary.paragraphChanges.added : [];
+    const paragraphRemoved = Array.isArray(summary?.paragraphChanges?.removed) ? summary.paragraphChanges.removed : [];
+    const paragraphAddedCount = Number(summary?.paragraphChanges?.addedCount) || paragraphAdded.length;
+    const paragraphRemovedCount = Number(summary?.paragraphChanges?.removedCount) || paragraphRemoved.length;
+    const changedPercent = Number(summary?.paragraphChanges?.changedPercent) || 0;
+    const wordDelta = Number(summary?.wordDelta) || 0;
+    if (paragraphAddedCount || paragraphRemovedCount || wordDelta) {
+      const section = document.createElement("section");
+      section.classList.add("watch-diff-modal__section");
+      const heading = document.createElement("h4");
+      heading.classList.add("watch-diff-modal__section-title");
+      heading.textContent = t("notification.watch.modal.section.content");
+      section.appendChild(heading);
+
+      const stats = document.createElement("p");
+      stats.classList.add("watch-diff-modal__stats");
+      stats.textContent = t("notification.watch.modal.contentStats", {
+        percent: numberFormatter.format(changedPercent),
+        added: numberFormatter.format(paragraphAddedCount),
+        removed: numberFormatter.format(paragraphRemovedCount),
+      });
+      section.appendChild(stats);
+
+      const word = document.createElement("p");
+      word.classList.add("watch-diff-modal__stats", "watch-diff-modal__stats--muted");
+      word.textContent = t("notification.watch.modal.wordDelta", {
+        value: numberFormatter.format(wordDelta),
+      });
+      section.appendChild(word);
+
+      const groups = document.createElement("div");
+      groups.classList.add("watch-diff-modal__changes");
+      groups.appendChild(buildChangeList(t("notification.watch.modal.added"), paragraphAdded, "added"));
+      groups.appendChild(buildChangeList(t("notification.watch.modal.removed"), paragraphRemoved, "removed"));
+      section.appendChild(groups);
+      modal.body.appendChild(section);
+      hasSection = true;
+    }
+
+    if (!hasSection) {
+      const empty = document.createElement("p");
+      empty.classList.add("watch-diff-modal__empty");
+      empty.textContent = t("notification.watch.modal.empty");
+      modal.body.appendChild(empty);
+    }
+  }
+
+  async function openWatchDiffModal(item) {
+    if (!item || item.source !== "watch") {
+      return;
+    }
+    const watchId = Number(item.watchId);
+    const diffId = Number(item.diffId || item.rawId);
+    if (!Number.isFinite(watchId) || !Number.isFinite(diffId)) {
+      showToast(t("notification.watch.modal.error"), "error");
+      return;
+    }
+
+    setDiffModalLoading(item);
+    try {
+      const response = await fetch(
+        `${API_WATCHES_ENDPOINT}/${encodeURIComponent(watchId)}/diff/${encodeURIComponent(diffId)}`,
+        { cache: "no-store" }
+      );
+      if (!response.ok) {
+        throw new Error(await parseResponseError(response, t("notification.watch.modal.error")));
+      }
+      const payload = await response.json().catch(() => null);
+      renderWatchDiffModal(item, payload);
+    } catch (error) {
+      const modal = ensureWatchDiffModal();
+      modal.body.innerHTML = "";
+      const fail = document.createElement("p");
+      fail.classList.add("watch-diff-modal__empty");
+      fail.textContent = t("notification.watch.modal.error");
+      modal.body.appendChild(fail);
+      showToast(
+        `${t("notification.watch.modal.error")}: ${(error && error.message) || t("datetime.unknown")}`,
+        "error"
+      );
+    }
+  }
+
   function renderList() {
     if (!scanNotificationList || !scanNotificationEmpty) {
       return;
@@ -2228,13 +2794,28 @@ const scanNotificationCenter = (() => {
 
       const meta = document.createElement("div");
       meta.classList.add("notification-center__meta");
+
+      const metaMain = document.createElement("div");
+      metaMain.classList.add("notification-center__meta-main");
+
       const sev = document.createElement("span");
       sev.classList.add("notification-center__severity", `notification-center__severity--${item.severity}`);
       sev.textContent = severityLabel(item.severity);
+
+      const source = document.createElement("span");
+      source.classList.add(
+        "notification-center__source",
+        `notification-center__source--${item.source === "watch" ? "watch" : "scan"}`
+      );
+      source.textContent = sourceLabel(item.source);
+
+      metaMain.append(sev, source);
+
       const time = document.createElement("span");
       time.classList.add("notification-center__time");
       time.textContent = formatRelativeTime(item.createdAt);
-      meta.append(sev, time);
+
+      meta.append(metaMain, time);
 
       const title = document.createElement("p");
       title.classList.add("notification-center__item-title");
@@ -2251,39 +2832,73 @@ const scanNotificationCenter = (() => {
     updateBadge();
   }
 
-  async function markAsRead(id) {
-    const parsedId = Number(id);
-    if (!Number.isFinite(parsedId)) {
+  async function markAsRead(item) {
+    if (!item || !item.id) {
       return false;
     }
-    const response = await fetch(`${API_SCAN_NOTIFICATIONS_ENDPOINT}/${encodeURIComponent(parsedId)}/read`, {
-      method: "POST",
-    });
-    if (!response.ok) {
-      return false;
-    }
-    state.notificationCenter.items = (state.notificationCenter.items || []).map((item) => {
-      if (!item || item.id !== parsedId) {
-        return item;
+
+    if (item.source === "watch") {
+      const parsedId = Number(item.rawId);
+      if (!Number.isFinite(parsedId)) {
+        return false;
       }
-      return { ...item, isRead: true };
+      const response = await fetch(
+        `${API_WATCHES_ENDPOINT}/diffs/${encodeURIComponent(parsedId)}/mark-read`,
+        { method: "PATCH" }
+      );
+      if (!response.ok) {
+        return false;
+      }
+    } else {
+      const parsedId = Number(item.rawId);
+      if (!Number.isFinite(parsedId)) {
+        return false;
+      }
+      const response = await fetch(
+        `${API_SCAN_NOTIFICATIONS_ENDPOINT}/${encodeURIComponent(parsedId)}/read`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        return false;
+      }
+    }
+
+    state.notificationCenter.items = (state.notificationCenter.items || []).map((entry) => {
+      if (!entry || entry.id !== item.id) {
+        return entry;
+      }
+      return { ...entry, isRead: true };
     });
-    state.notificationCenter.unreadCount = state.notificationCenter.items.filter((item) => item && !item.isRead).length;
+    state.notificationCenter.unreadCount = state.notificationCenter.items.filter((entry) => entry && !entry.isRead).length;
     renderList();
     return true;
   }
 
   async function markAllRead() {
-    const response = await fetch(API_SCAN_NOTIFICATIONS_READ_ALL_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    });
-    if (!response.ok) {
+    const responses = await Promise.allSettled([
+      fetch(API_SCAN_NOTIFICATIONS_READ_ALL_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+      fetch(API_WATCH_DIFFS_MARK_ALL_ENDPOINT, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    ]);
+
+    const hasSuccess = responses.some(
+      (result) => result.status === "fulfilled" && result.value && result.value.ok
+    );
+    if (!hasSuccess) {
       return false;
     }
+
     state.notificationCenter.items = (state.notificationCenter.items || []).map((item) =>
       item ? { ...item, isRead: true } : item
     );
@@ -2292,28 +2907,55 @@ const scanNotificationCenter = (() => {
     return true;
   }
 
+  async function fetchScanItems() {
+    const response = await fetch(
+      `${API_SCAN_NOTIFICATIONS_ENDPOINT}?limit=${encodeURIComponent(limit)}`,
+      { cache: "no-store" }
+    );
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json().catch(() => []);
+    return (Array.isArray(payload) ? payload : []).map(normalizeScanNotification).filter(Boolean);
+  }
+
+  async function fetchWatchItems() {
+    const response = await fetch(
+      `${API_WATCH_DIFFS_ENDPOINT}?limit=${encodeURIComponent(limit)}`,
+      { cache: "no-store" }
+    );
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const payload = await response.json().catch(() => []);
+    return (Array.isArray(payload) ? payload : [])
+      .map(normalizeWatchDiffNotification)
+      .filter(Boolean);
+  }
+
   async function refreshNow({ silent = false } = {}) {
     if (isLoading) {
       return;
     }
     isLoading = true;
     try {
-      const response = await fetch(
-        `${API_SCAN_NOTIFICATIONS_ENDPOINT}?limit=${encodeURIComponent(limit)}`,
-        { cache: "no-store" }
-      );
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const payload = await response.json().catch(() => []);
-      const nextItems = (Array.isArray(payload) ? payload : [])
-        .map(normalizeNotification)
-        .filter(Boolean);
+      const [scanResult, watchResult] = await Promise.allSettled([
+        fetchScanItems(),
+        fetchWatchItems(),
+      ]);
+
+      const scanItems = scanResult.status === "fulfilled" ? scanResult.value : [];
+      const watchItems = watchResult.status === "fulfilled" ? watchResult.value : [];
+      const nextItems = [...scanItems, ...watchItems]
+        .sort(compareNotifications)
+        .slice(0, limit);
+
       const previousUnread = new Set(
         (state.notificationCenter.items || [])
           .filter((item) => item && !item.isRead)
           .map((item) => item.id)
       );
+
       state.notificationCenter.items = nextItems;
       state.notificationCenter.unreadCount = nextItems.filter((item) => !item.isRead).length;
       renderList();
@@ -2325,9 +2967,18 @@ const scanNotificationCenter = (() => {
         }
       }
       state.notificationCenter.loaded = true;
+
+      if (!silent) {
+        if (scanResult.status === "rejected") {
+          console.warn("Scan notifications could not be loaded:", scanResult.reason);
+        }
+        if (watchResult.status === "rejected") {
+          console.warn("Watch notifications could not be loaded:", watchResult.reason);
+        }
+      }
     } catch (error) {
       if (!silent) {
-        console.warn("Scan notifications could not be loaded:", error);
+        console.warn("Notifications could not be loaded:", error);
       }
     } finally {
       isLoading = false;
@@ -2341,12 +2992,25 @@ const scanNotificationCenter = (() => {
     if (!row) {
       return;
     }
-    const notificationId = Number(row.dataset.notificationId);
-    const item = (state.notificationCenter.items || []).find((entry) => entry && entry.id === notificationId);
+    const notificationId = String(row.dataset.notificationId || "");
+    if (!notificationId) {
+      return;
+    }
+    const item = (state.notificationCenter.items || []).find(
+      (entry) => entry && String(entry.id) === notificationId
+    );
     if (!item) {
       return;
     }
-    markAsRead(notificationId).catch(() => undefined);
+
+    markAsRead(item).catch(() => undefined);
+
+    if (item.source === "watch") {
+      openWatchDiffModal(item).catch(() => undefined);
+      setPanelOpen(false);
+      return;
+    }
+
     if (item.sitemapUrl) {
       const targetRow = state.rows.find((entry) => entry && entry.url === item.sitemapUrl);
       if (targetRow) {
@@ -2370,6 +3034,9 @@ const scanNotificationCenter = (() => {
     state.notificationCenter.items = [];
     state.notificationCenter.unreadCount = 0;
     state.notificationCenter.loaded = false;
+    if (watchDiffModal) {
+      watchDiffModal.setOpen(false);
+    }
     renderList();
   }
 
@@ -2382,6 +3049,9 @@ const scanNotificationCenter = (() => {
     ) {
       return;
     }
+
+    ensureWatchDiffModal();
+
     scanNotificationBell.addEventListener("click", () => {
       const next = !state.notificationCenter.isOpen;
       setPanelOpen(next);
@@ -2705,6 +3375,8 @@ const scanNotificationList = document.querySelector("#scanNotificationList");
 const scanNotificationEmpty = document.querySelector("#scanNotificationEmpty");
 const scanNotificationReadAll = document.querySelector("#scanNotificationReadAll");
 const scanNotificationClose = document.querySelector("#scanNotificationClose");
+const sidebarWatchCount = document.querySelector("#sidebarWatchCount");
+const sidebarWatchList = document.querySelector("#sidebarWatchList");
 const exportSitemapsCsv = document.querySelector("#exportSitemapsCsv");
 const exportSitemapsJson = document.querySelector("#exportSitemapsJson");
 const alertsOnlyToggle = document.querySelector("#alertsOnlyToggle");
@@ -3095,6 +3767,7 @@ async function loadSitemaps() {
     renderDomainMenu();
     renderTagMenu();
     renderTable();
+    await loadSidebarWatchList({ silent: true });
     setStatus("Listede sitemap bulunmuyor. Yeni bir URL ekleyebilirsiniz.");
     notificationManager.reset();
     scanNotificationCenter.reset();
@@ -3121,6 +3794,7 @@ async function loadSitemaps() {
     renderDomainMenu();
     renderTagMenu();
     renderTable();
+    await loadSidebarWatchList({ silent: true });
     scanNotificationCenter.refreshNow({ silent: true });
 
     const successCount = rows.filter((row) => !row.error).length;
@@ -3252,6 +3926,8 @@ function resetDetails() {
   state.detailSearchQuery = "";
   state.detailPage = 1;
   state.detailMetadata = new Map();
+  state.detailWatchesByUrl = new Map();
+  state.detailWatchPending = new Set();
   state.detailExpandedUrl = null;
   state.detailAccordionTabs = new Map();
   resetDetailScanState();
@@ -3323,6 +3999,270 @@ async function parseResponseError(response, fallbackMessage) {
     }
   }
   return payload.trim() || fallbackMessage;
+}
+
+function formatSidebarWatchUrl(value) {
+  if (!value || typeof value !== "string") {
+    return "-";
+  }
+  try {
+    const parsed = new URL(value);
+    const normalized = `${parsed.hostname}${parsed.pathname || "/"}`;
+    return normalized.length <= 42 ? normalized : `${normalized.slice(0, 39)}...`;
+  } catch (_error) {
+    const text = value.trim();
+    return text.length <= 42 ? text : `${text.slice(0, 39)}...`;
+  }
+}
+
+function renderSidebarWatchList() {
+  if (!sidebarWatchList || !sidebarWatchCount) {
+    return;
+  }
+
+  const watches = Array.isArray(state.sidebarWatches) ? state.sidebarWatches : [];
+  sidebarWatchCount.textContent = numberFormatter.format(watches.length || 0);
+  sidebarWatchList.innerHTML = "";
+
+  if (state.sidebarWatchesLoading && !watches.length) {
+    const loading = document.createElement("p");
+    loading.classList.add("sidebar__watchlist-empty");
+    loading.textContent = t("sidebar.watch.loading");
+    sidebarWatchList.appendChild(loading);
+    return;
+  }
+
+  if (!watches.length) {
+    const empty = document.createElement("p");
+    empty.classList.add("sidebar__watchlist-empty");
+    empty.textContent = t("sidebar.watch.empty");
+    sidebarWatchList.appendChild(empty);
+    return;
+  }
+
+  watches.slice(0, 30).forEach((watch) => {
+    if (!watch || typeof watch.url !== "string" || !watch.url.trim()) {
+      return;
+    }
+    const item = document.createElement("a");
+    item.classList.add("sidebar__watchlist-item");
+    item.href = watch.url;
+    item.target = "_blank";
+    item.rel = "noopener noreferrer";
+    item.title = watch.url;
+
+    const icon = document.createElement("span");
+    icon.classList.add("sidebar__watchlist-icon");
+    icon.appendChild(createIcon("mdi:bell-outline", 14));
+
+    const content = document.createElement("span");
+    content.classList.add("sidebar__watchlist-content");
+
+    const label = document.createElement("span");
+    label.classList.add("sidebar__watchlist-url");
+    label.textContent = formatSidebarWatchUrl(watch.url);
+
+    const meta = document.createElement("span");
+    meta.classList.add("sidebar__watchlist-meta");
+    if (watch.sitemapUrl) {
+      meta.textContent = extractDomain(watch.sitemapUrl);
+    } else {
+      meta.textContent = t("sidebar.watch.meta.updated", {
+        time: formatDateTime(watch.updatedAt || watch.createdAt || watch.latestDiffAt || ""),
+      });
+    }
+
+    content.append(label, meta);
+    item.append(icon, content);
+    sidebarWatchList.appendChild(item);
+  });
+}
+
+async function loadSidebarWatchList({ silent = false } = {}) {
+  if (!sidebarWatchList || !sidebarWatchCount) {
+    return [];
+  }
+
+  state.sidebarWatchesLoading = true;
+  renderSidebarWatchList();
+
+  try {
+    const response = await fetch(`${API_WATCHES_ENDPOINT}?active=1`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(await parseResponseError(response, t("details.watch.loadError")));
+    }
+    const payload = await response.json().catch(() => []);
+    state.sidebarWatches = Array.isArray(payload) ? payload : [];
+    return state.sidebarWatches;
+  } catch (error) {
+    console.warn("Sidebar watch list could not be loaded:", error);
+    if (!silent) {
+      showToast(t("details.watch.loadError"), "error");
+    }
+    return Array.isArray(state.sidebarWatches) ? state.sidebarWatches : [];
+  } finally {
+    state.sidebarWatchesLoading = false;
+    renderSidebarWatchList();
+  }
+}
+
+function normalizeDetailWatchUrl(value) {
+  if (!value || typeof value !== "string") {
+    return "";
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  try {
+    return new URL(trimmed).href;
+  } catch (_error) {
+    return trimmed;
+  }
+}
+
+function getDetailWatchByUrl(url) {
+  const normalizedUrl = normalizeDetailWatchUrl(url);
+  if (!normalizedUrl || !(state.detailWatchesByUrl instanceof Map)) {
+    return null;
+  }
+  return state.detailWatchesByUrl.get(normalizedUrl) || null;
+}
+
+async function loadDetailWatches({ silent = false } = {}) {
+  const selectedSitemapUrl =
+    state.selected &&
+    !state.selected.isDomainAggregate &&
+    typeof state.selected.url === "string" &&
+    state.selected.url
+      ? normalizeDetailWatchUrl(state.selected.url)
+      : "";
+  const requestUrl = selectedSitemapUrl
+    ? `${API_WATCHES_ENDPOINT}?sitemapUrl=${encodeURIComponent(selectedSitemapUrl)}`
+    : API_WATCHES_ENDPOINT;
+
+  try {
+    const response = await fetch(requestUrl, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(await parseResponseError(response, t("details.watch.loadError")));
+    }
+    const payload = await response.json().catch(() => []);
+    const nextMap = new Map();
+    if (Array.isArray(payload)) {
+      payload.forEach((watch) => {
+        if (!watch || typeof watch.url !== "string") {
+          return;
+        }
+        const normalized = normalizeDetailWatchUrl(watch.url);
+        if (!normalized) {
+          return;
+        }
+        nextMap.set(normalized, watch);
+      });
+    }
+    state.detailWatchesByUrl = nextMap;
+    return nextMap;
+  } catch (error) {
+    console.warn("Watch list could not be loaded:", error);
+    if (!silent) {
+      showToast(t("details.watch.loadError"), "error");
+    }
+    return state.detailWatchesByUrl;
+  }
+}
+
+async function handleWatchToggleClick(href) {
+  const normalizedHref = normalizeDetailWatchUrl(href);
+  if (!normalizedHref) {
+    return;
+  }
+  if (!(state.detailWatchPending instanceof Set)) {
+    state.detailWatchPending = new Set();
+  }
+  if (state.detailWatchPending.has(normalizedHref)) {
+    return;
+  }
+
+  state.detailWatchPending.add(normalizedHref);
+  scheduleDetailsRender();
+
+  try {
+    const existing = getDetailWatchByUrl(normalizedHref);
+
+    if (existing && existing.id && existing.isActive !== false) {
+      const response = await fetch(
+        `${API_WATCHES_ENDPOINT}/${encodeURIComponent(existing.id)}`,
+        { method: "DELETE" }
+      );
+      if (!response.ok) {
+        throw new Error(await parseResponseError(response, t("details.watch.error", { error: response.status })));
+      }
+      state.detailWatchesByUrl.delete(normalizedHref);
+      showToast(t("details.watch.disabled"), "success");
+      return;
+    }
+
+    if (existing && existing.id) {
+      const response = await fetch(
+        `${API_WATCHES_ENDPOINT}/${encodeURIComponent(existing.id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ isActive: true }),
+        }
+      );
+      if (!response.ok) {
+        throw new Error(await parseResponseError(response, t("details.watch.error", { error: response.status })));
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (payload && payload.watch && typeof payload.watch.url === "string") {
+        state.detailWatchesByUrl.set(normalizedHref, payload.watch);
+      }
+      showToast(t("details.watch.enabled"), "success");
+      return;
+    }
+
+    const selectedSitemapUrl =
+      state.selected &&
+      !state.selected.isDomainAggregate &&
+      typeof state.selected.url === "string"
+        ? state.selected.url
+        : "";
+    const response = await fetch(API_WATCHES_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url: normalizedHref,
+        sitemapUrl: selectedSitemapUrl,
+        initialize: true,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(await parseResponseError(response, t("details.watch.error", { error: response.status })));
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (payload && payload.watch && typeof payload.watch.url === "string") {
+      state.detailWatchesByUrl.set(normalizedHref, payload.watch);
+    } else {
+      await loadDetailWatches({ silent: true });
+    }
+    showToast(t("details.watch.enabled"), "success");
+  } catch (error) {
+    showToast(
+      t("details.watch.error", {
+        error: (error && error.message) || t("datetime.unknown"),
+      }),
+      "error"
+    );
+  } finally {
+    state.detailWatchPending.delete(normalizedHref);
+    await loadSidebarWatchList({ silent: true });
+    scheduleDetailsRender();
+  }
 }
 
 function formatLinkMapPreviewUrl(value) {
@@ -4975,6 +5915,12 @@ async function handleDetailsTableToggle(event) {
         toggleCompareUrl(href);
       }
     }
+    if (action === "watch-toggle") {
+      const href = actionButton.dataset.href;
+      if (href) {
+        await handleWatchToggleClick(href);
+      }
+    }
     return;
   }
 
@@ -5916,7 +6862,21 @@ function renderTable() {
     dateCell.classList.add("table__date");
     if (row.error) {
       const typeTag = row.errorType ? `[${row.errorType}] ` : "";
-      dateCell.textContent = `${t("table.errorPrefix")} ${typeTag}${row.error}`;
+      const errorMessage = `${t("table.errorPrefix")} ${typeTag}${row.error}`;
+      const errorBadge = document.createElement("div");
+      errorBadge.classList.add("table__date-error");
+      errorBadge.title = errorMessage;
+
+      const errorIcon = createIcon("mdi:alert-circle-outline", 16);
+      errorIcon.classList.add("table__date-error-icon");
+
+      const errorText = document.createElement("span");
+      errorText.classList.add("table__date-error-text");
+      errorText.textContent = errorMessage;
+
+      errorBadge.append(errorIcon, errorText);
+      dateCell.classList.add("table__date--error");
+      dateCell.appendChild(errorBadge);
     } else {
       dateCell.textContent = row.latestDate;
     }
@@ -6139,6 +7099,8 @@ async function showDetails(row) {
   dateFromInput.value = "";
   dateToInput.value = "";
   state.detailMetadata = new Map();
+  state.detailWatchesByUrl = new Map();
+  state.detailWatchPending = new Set();
   state.detailExpandedUrl = null;
   state.detailAccordionTabs = new Map();
   resetDetailScanState({ preserveLast: true });
@@ -6179,7 +7141,7 @@ async function showDetails(row) {
       ? details.recentEntries
       : deriveRecentEntries(details.entries, 8);
     setDetailStatus(t("details.status.loadedCount", { count: numberFormatter.format(details.entries.length) }));
-    await Promise.all([loadLatestScanResults(row.url), loadSavedLinkMap(row.url)]);
+    await Promise.all([loadLatestScanResults(row.url), loadSavedLinkMap(row.url), loadDetailWatches({ silent: true })]);
     applyLinkMapStatusesToDetailEntries(row.url);
   } catch (error) {
     console.error(`"${row.title}" detaylarÃ„Â± yÃƒÂ¼klenemedi:`, error);
@@ -6226,6 +7188,8 @@ async function showDomainDetails(domain) {
   dateFromInput.value = "";
   dateToInput.value = "";
   state.detailMetadata = new Map();
+  state.detailWatchesByUrl = new Map();
+  state.detailWatchPending = new Set();
   state.detailExpandedUrl = null;
   state.detailAccordionTabs = new Map();
   resetDetailScanState({ preserveLast: true });
@@ -6277,6 +7241,7 @@ async function showDomainDetails(domain) {
 
   state.detailEntries = uniqueEntries;
   state.detailType = "domain";
+  await loadDetailWatches({ silent: true });
   state.isLoadingDetails = false;
   renderDetails();
   setDetailStatus(
@@ -6369,22 +7334,29 @@ function ensureCompareUi() {
     actions.classList.add("details-compare__bar-actions");
     bar.appendChild(actions);
   }
-  if (!document.getElementById("detailsCompareBarClear")) {
-    const clear = document.createElement("button");
-    clear.id = "detailsCompareBarClear";
-    clear.type = "button";
-    clear.classList.add("details-compare__bar-clear");
-    clear.textContent = t("details.compare.clear");
-    actions.appendChild(clear);
+  let barActionButton = document.getElementById("detailsCompareBarButton");
+  if (!barActionButton) {
+    barActionButton = document.createElement("button");
+    barActionButton.id = "detailsCompareBarButton";
+    barActionButton.type = "button";
+    barActionButton.classList.add("details-compare__bar-button");
+    barActionButton.disabled = true;
+    barActionButton.textContent = t("details.compare.cta.waiting");
   }
-  if (!document.getElementById("detailsCompareBarButton")) {
-    const button = document.createElement("button");
-    button.id = "detailsCompareBarButton";
-    button.type = "button";
-    button.classList.add("details-compare__bar-button");
-    button.disabled = true;
-    button.textContent = t("details.compare.cta.waiting");
-    actions.appendChild(button);
+  if (barActionButton.parentElement !== actions) {
+    actions.appendChild(barActionButton);
+  }
+
+  let barActionClear = document.getElementById("detailsCompareBarClear");
+  if (!barActionClear) {
+    barActionClear = document.createElement("button");
+    barActionClear.id = "detailsCompareBarClear";
+    barActionClear.type = "button";
+    barActionClear.classList.add("details-compare__bar-clear");
+    barActionClear.textContent = t("details.compare.clear");
+  }
+  if (barActionClear.parentElement !== actions) {
+    actions.insertBefore(barActionClear, barActionButton);
   }
 
   let modal = document.getElementById("detailsCompareModal");
@@ -6589,8 +7561,8 @@ function computeParagraphDiff(sourceParagraphs, targetParagraphs) {
   toMap(sourceParagraphs, sourceMap);
   toMap(targetParagraphs, targetMap);
 
-  const removed = [];
-  const added = [];
+  const leftOnly = [];
+  const rightOnly = [];
   let same = 0;
 
   sourceMap.forEach((original, normalized) => {
@@ -6598,20 +7570,23 @@ function computeParagraphDiff(sourceParagraphs, targetParagraphs) {
       same += 1;
       return;
     }
-    removed.push(original);
+    leftOnly.push(original);
   });
   targetMap.forEach((original, normalized) => {
     if (!sourceMap.has(normalized)) {
-      added.push(original);
+      rightOnly.push(original);
     }
   });
 
-  return { added, removed, same };
+  return { leftOnly, rightOnly, same };
 }
 
-function buildCompareContentDiff(diff) {
+function buildCompareContentDiff(diff, leftData, rightData) {
   const section = document.createElement("section");
   section.classList.add("details-compare__content-diff");
+
+  const leftLabel = formatCompareColumnLabel(leftData, 0);
+  const rightLabel = formatCompareColumnLabel(rightData, 1);
 
   const title = document.createElement("h4");
   title.classList.add("details-compare__content-title");
@@ -6620,14 +7595,16 @@ function buildCompareContentDiff(diff) {
 
   const summary = document.createElement("p");
   summary.classList.add("details-compare__content-summary");
-  summary.textContent = t("details.compare.content.summary", {
-    added: diff.added.length,
-    removed: diff.removed.length,
+  summary.textContent = t("details.compare.content.summaryDual", {
+    left: leftLabel,
+    right: rightLabel,
+    leftOnly: diff.leftOnly.length,
+    rightOnly: diff.rightOnly.length,
     same: diff.same,
   });
   section.appendChild(summary);
 
-  if (!diff.added.length && !diff.removed.length) {
+  if (!diff.leftOnly.length && !diff.rightOnly.length) {
     const empty = document.createElement("p");
     empty.classList.add("details-compare__content-empty");
     empty.textContent = t("details.compare.content.none");
@@ -6677,8 +7654,12 @@ function buildCompareContentDiff(diff) {
     return group;
   };
 
-  groups.appendChild(buildGroup(diff.added, "added", t("details.compare.content.added")));
-  groups.appendChild(buildGroup(diff.removed, "removed", t("details.compare.content.removed")));
+  groups.appendChild(
+    buildGroup(diff.leftOnly, "left", t("details.compare.content.uniqueLabel", { label: leftLabel }))
+  );
+  groups.appendChild(
+    buildGroup(diff.rightOnly, "right", t("details.compare.content.uniqueLabel", { label: rightLabel }))
+  );
   section.appendChild(groups);
 
   return section;
@@ -7081,7 +8062,7 @@ function renderComparePanel() {
     summary.appendChild(buildCompareSchemaMatrix(dataList));
     if (dataList.length === 2) {
       const paragraphDiff = computeParagraphDiff(dataList[0].paragraphs, dataList[1].paragraphs);
-      summary.appendChild(buildCompareContentDiff(paragraphDiff));
+      summary.appendChild(buildCompareContentDiff(paragraphDiff, dataList[0], dataList[1]));
     }
     ui.summary.appendChild(summary);
   }
@@ -8252,6 +9233,41 @@ function renderDetails() {
     singleButton.setAttribute("aria-label", t("details.actions.scanSingle"));
     singleButton.appendChild(createIcon("mdi:flash-outline", 16));
     actions.appendChild(singleButton);
+    const normalizedEntryHref = normalizeDetailWatchUrl(entry.href || "");
+    const watchEntry = getDetailWatchByUrl(normalizedEntryHref);
+    const isWatched = Boolean(watchEntry && watchEntry.id && watchEntry.isActive !== false);
+    const isWatchPending =
+      Boolean(normalizedEntryHref) &&
+      state.detailWatchPending instanceof Set &&
+      state.detailWatchPending.has(normalizedEntryHref);
+    const watchButton = document.createElement("button");
+    watchButton.type = "button";
+    watchButton.classList.add("details-row__action", "details-row__action--watch");
+    if (isWatched) {
+      watchButton.classList.add("details-row__action--active");
+    }
+    watchButton.dataset.action = "watch-toggle";
+    watchButton.dataset.href = entry.href || "";
+    watchButton.disabled = isWatchPending;
+    watchButton.setAttribute(
+      "aria-label",
+      isWatchPending
+        ? t("details.actions.watchPending")
+        : isWatched
+        ? t("details.actions.watchDisable")
+        : t("details.actions.watchEnable")
+    );
+    watchButton.appendChild(
+      createIcon(
+        isWatchPending
+          ? "mdi:bell-outline"
+          : isWatched
+          ? "mdi:bell-alert-outline"
+          : "mdi:bell-outline",
+        16
+      )
+    );
+    actions.appendChild(watchButton);
     linkCell.appendChild(actions);
 
     const link = document.createElement("a");

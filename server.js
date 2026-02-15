@@ -181,6 +181,28 @@ const envSchema = z.object({
     .string()
     .optional()
     .refine((value) => !value || cron.validate(value), "CRON_SCHEDULE gecersiz."),
+  PAGE_WATCH_SCHEDULER_ENABLED: z.string().optional(),
+  PAGE_WATCH_SCHEDULER_INTERVAL_MS: z
+    .string()
+    .optional()
+    .refine(
+      (value) => !value || Number.isFinite(Number(value)),
+      "PAGE_WATCH_SCHEDULER_INTERVAL_MS sayi olmali."
+    ),
+  PAGE_WATCH_SCHEDULER_BATCH_SIZE: z
+    .string()
+    .optional()
+    .refine(
+      (value) => !value || Number.isFinite(Number(value)),
+      "PAGE_WATCH_SCHEDULER_BATCH_SIZE sayi olmali."
+    ),
+  PAGE_WATCH_SCHEDULER_DELAY_MS: z
+    .string()
+    .optional()
+    .refine(
+      (value) => !value || Number.isFinite(Number(value)),
+      "PAGE_WATCH_SCHEDULER_DELAY_MS sayi olmali."
+    ),
   LOG_LEVEL: z.string().optional(),
 }).passthrough();
 
@@ -246,6 +268,23 @@ const SCAN_SAMPLE_RATE = Number.isFinite(parsedScanSampleRate) ? Math.max(0, par
 const SCAN_SAMPLE_MAX = Number.isFinite(parsedScanSampleMax) ? Math.max(1, parsedScanSampleMax) : 2000;
 const SCAN_DIFF_URL_SAMPLE_LIMIT = 100;
 const SCAN_NOTIFICATION_RETENTION_DAYS = 30;
+const PAGE_WATCH_DEFAULT_FREQUENCY_MINUTES = 60;
+const PAGE_WATCH_MIN_FREQUENCY_MINUTES = 5;
+const PAGE_WATCH_MAX_FREQUENCY_MINUTES = 24 * 60;
+const PAGE_WATCH_MAX_STORED_HTML_BYTES = 512 * 1024;
+const PAGE_WATCH_SCHEDULER_ENABLED = String(process.env.PAGE_WATCH_SCHEDULER_ENABLED || "1").trim() !== "0";
+const parsedPageWatchSchedulerIntervalMs = Number(process.env.PAGE_WATCH_SCHEDULER_INTERVAL_MS);
+const PAGE_WATCH_SCHEDULER_INTERVAL_MS = Number.isFinite(parsedPageWatchSchedulerIntervalMs)
+  ? Math.max(60 * 1000, parsedPageWatchSchedulerIntervalMs)
+  : 5 * 60 * 1000;
+const parsedPageWatchSchedulerBatchSize = Number(process.env.PAGE_WATCH_SCHEDULER_BATCH_SIZE);
+const PAGE_WATCH_SCHEDULER_BATCH_SIZE = Number.isFinite(parsedPageWatchSchedulerBatchSize)
+  ? Math.max(1, Math.min(Math.floor(parsedPageWatchSchedulerBatchSize), 100))
+  : 20;
+const parsedPageWatchSchedulerDelayMs = Number(process.env.PAGE_WATCH_SCHEDULER_DELAY_MS);
+const PAGE_WATCH_SCHEDULER_DELAY_MS = Number.isFinite(parsedPageWatchSchedulerDelayMs)
+  ? Math.max(0, Math.floor(parsedPageWatchSchedulerDelayMs))
+  : 2000;
 const parsedCacheTtl = Number(process.env.SITEMAP_CACHE_TTL_MS);
 const parsedRefreshInterval = Number(process.env.SITEMAP_CACHE_REFRESH_INTERVAL_MS);
 const parsedCacheMaxAge = Number(process.env.SITEMAP_CACHE_MAX_AGE_MS);
@@ -1082,7 +1121,7 @@ async function fetchSitemapStreamWithRetry(targetUrl) {
   return fetchSitemapXmlWithRetryInternal(targetUrl, { stream: true });
 }
 
-async function fetchPageHtmlWithRetry(targetUrl) {
+async function fetchPageHtmlWithRetry(targetUrl, options = {}) {
   let target;
   try {
     target = new URL(targetUrl);
@@ -1096,6 +1135,10 @@ async function fetchPageHtmlWithRetry(targetUrl) {
 
   await assertPublicUrl(target.href);
 
+  const extraHeaders =
+    options && options.headers && typeof options.headers === "object" ? options.headers : {};
+  const allowNotModified = Boolean(options && options.allowNotModified);
+
   if (isPuppeteerFirstHost(target.hostname)) {
     try {
       const puppeteerContent = await fetchWithPuppeteer(target.href, PROXY_TIMEOUT_MS);
@@ -1104,6 +1147,8 @@ async function fetchPageHtmlWithRetry(targetUrl) {
         statusCode: 200,
         contentType: "text/html; charset=utf-8",
         fetchMode: "puppeteer",
+        etag: "",
+        lastModified: "",
       };
     } catch (error) {
       console.warn("Puppeteer primary page fetch hatasi:", error.message || error);
@@ -1129,6 +1174,12 @@ async function fetchPageHtmlWithRetry(targetUrl) {
       "Sec-Ch-Ua-Mobile": "?0",
       "Sec-Ch-Ua-Platform": '"Windows"',
     };
+    for (const [headerName, headerValue] of Object.entries(extraHeaders)) {
+      if (typeof headerValue !== "string" || !headerValue.trim()) {
+        continue;
+      }
+      headers[headerName] = headerValue;
+    }
 
     if (attempt === 1) {
       headers["Cache-Control"] = "max-age=0";
@@ -1261,12 +1312,25 @@ async function fetchPageHtmlWithRetry(targetUrl) {
             statusCode: 200,
             contentType: "text/html; charset=utf-8",
             fetchMode: "puppeteer",
+            etag: "",
+            lastModified: "",
           };
         } catch (puppeteerError) {
           lastError = puppeteerError;
         }
       }
       throw lastError || new Error("Tum denemeler basarisiz oldu");
+    }
+
+    if (allowNotModified && response.status === 304) {
+      return {
+        html: "",
+        statusCode: 304,
+        contentType: responseContentType,
+        fetchMode: "fetch",
+        etag: response.headers.get("etag") || "",
+        lastModified: response.headers.get("last-modified") || "",
+      };
     }
 
     if (!response.ok) {
@@ -1278,6 +1342,8 @@ async function fetchPageHtmlWithRetry(targetUrl) {
             statusCode: 200,
             contentType: "text/html; charset=utf-8",
             fetchMode: "puppeteer",
+            etag: "",
+            lastModified: "",
           };
         } catch (puppeteerError) {
           console.error("Puppeteer fetch hatasi:", puppeteerError.message);
@@ -1295,6 +1361,8 @@ async function fetchPageHtmlWithRetry(targetUrl) {
       statusCode: response.status,
       contentType: responseContentType,
       fetchMode: "fetch",
+      etag: response.headers.get("etag") || "",
+      lastModified: response.headers.get("last-modified") || "",
     };
   } catch (error) {
     if (shouldFallbackToPuppeteer(error) || shouldRetryInsecure(error)) {
@@ -1305,6 +1373,8 @@ async function fetchPageHtmlWithRetry(targetUrl) {
           statusCode: 200,
           contentType: "text/html; charset=utf-8",
           fetchMode: "puppeteer",
+          etag: "",
+          lastModified: "",
         };
       } catch (puppeteerError) {
         console.error("Puppeteer fallback fetch hatasi:", puppeteerError.message);
@@ -2105,11 +2175,29 @@ let refreshTimer = null;
 let scanDb = null;
 let purgeTimer = null;
 let cronTask = null;
+let pageWatchSchedulerTimer = null;
 let cronHealthCheckRunning = false;
 let cronCrawlErrorsRunning = false;
 let serverInstance = null;
 let isShuttingDown = false;
 const activeSockets = new Set();
+const pageWatchSchedulerState = {
+  isRunning: false,
+  currentBatch: [],
+  stats: {
+    totalChecks: 0,
+    successfulChecks: 0,
+    failedChecks: 0,
+    changesDetected: 0,
+    skippedRuns: 0,
+    lastStartedAt: null,
+    lastFinishedAt: null,
+    lastDurationMs: 0,
+    lastBatchSize: 0,
+    lastProcessedCount: 0,
+    lastError: null,
+  },
+};
 
 function resolveBrowserExecutablePath() {
   const envPath = String(process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || "").trim();
@@ -5708,8 +5796,690 @@ function initScanDb() {
     CREATE INDEX IF NOT EXISTS idx_scan_notifications_sitemap_time ON scan_notifications (sitemap_url, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_scan_notifications_read_sitemap ON scan_notifications (is_read, sitemap_url, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_scan_notifications_run ON scan_notifications (run_id);
+    CREATE TABLE IF NOT EXISTS page_watches (
+      id INTEGER PRIMARY KEY,
+      url TEXT NOT NULL UNIQUE,
+      sitemap_url TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      check_frequency_minutes INTEGER NOT NULL DEFAULT 60,
+      notification_preferences_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_checked_at TEXT,
+      baseline_snapshot_id INTEGER,
+      latest_snapshot_id INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS page_watch_snapshots (
+      id INTEGER PRIMARY KEY,
+      watch_id INTEGER NOT NULL,
+      fetched_at TEXT NOT NULL,
+      status_code INTEGER,
+      etag TEXT,
+      last_modified TEXT,
+      raw_hash TEXT,
+      normalized_hash TEXT,
+      metadata_json TEXT,
+      normalized_content TEXT,
+      raw_html_gzip BLOB,
+      fetch_mode TEXT,
+      FOREIGN KEY (watch_id) REFERENCES page_watches(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS page_watch_diffs (
+      id INTEGER PRIMARY KEY,
+      watch_id INTEGER NOT NULL,
+      prev_snapshot_id INTEGER,
+      curr_snapshot_id INTEGER NOT NULL,
+      detected_at TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'minor',
+      summary_json TEXT,
+      patch_json TEXT,
+      is_notified INTEGER NOT NULL DEFAULT 0,
+      notified_at TEXT,
+      FOREIGN KEY (watch_id) REFERENCES page_watches(id) ON DELETE CASCADE,
+      FOREIGN KEY (prev_snapshot_id) REFERENCES page_watch_snapshots(id) ON DELETE SET NULL,
+      FOREIGN KEY (curr_snapshot_id) REFERENCES page_watch_snapshots(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_page_watches_active ON page_watches (is_active, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_page_watches_sitemap ON page_watches (sitemap_url);
+    CREATE INDEX IF NOT EXISTS idx_page_watch_snapshots_watch_time ON page_watch_snapshots (watch_id, fetched_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_page_watch_diffs_watch_time ON page_watch_diffs (watch_id, detected_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_page_watch_diffs_notified_time ON page_watch_diffs (is_notified, detected_at DESC);
   `);
   return scanDb;
+}
+
+function safeParseJson(value, fallback = null) {
+  if (typeof value !== "string" || !value.trim()) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function normalizeWatchFrequencyMinutes(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return PAGE_WATCH_DEFAULT_FREQUENCY_MINUTES;
+  }
+  const rounded = Math.round(parsed);
+  return Math.min(
+    PAGE_WATCH_MAX_FREQUENCY_MINUTES,
+    Math.max(PAGE_WATCH_MIN_FREQUENCY_MINUTES, rounded)
+  );
+}
+
+function normalizeWatchNotificationPreferences(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const normalized = {};
+  if (Object.prototype.hasOwnProperty.call(value, "criticalOnly")) {
+    normalized.criticalOnly = Boolean(value.criticalOnly);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "browser")) {
+    normalized.browser = Boolean(value.browser);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "email")) {
+    normalized.email = Boolean(value.email);
+  }
+  return Object.keys(normalized).length ? normalized : null;
+}
+
+function normalizeWatchText(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function extractPageWatchMetadata(html) {
+  const empty = {
+    title: "",
+    description: "",
+    headings: [],
+    paragraphs: [],
+    wordCount: 0,
+  };
+  if (typeof html !== "string" || !html.trim()) {
+    return empty;
+  }
+
+  let $;
+  try {
+    $ = cheerio.load(html);
+  } catch (_error) {
+    return empty;
+  }
+
+  const title = normalizeWatchText($("title").first().text() || "");
+  const description = normalizeWatchText(
+    $('meta[name="description"]').attr("content") ||
+      $('meta[property="og:description"]').attr("content") ||
+      ""
+  );
+
+  const headingSet = new Set();
+  const headings = [];
+  $("h1, h2, h3, h4, h5, h6").each((_, element) => {
+    const text = normalizeWatchText($(element).text() || "");
+    const normalized = text.toLowerCase();
+    if (!text || headingSet.has(normalized)) {
+      return;
+    }
+    headingSet.add(normalized);
+    headings.push(text);
+  });
+
+  const paragraphSet = new Set();
+  const paragraphs = [];
+  $("main article p, article p, main p, [role='main'] p, body p").each((_, element) => {
+    const el = $(element);
+    if (el.parents("header, nav, footer, aside, form, script, style, noscript, template").length) {
+      return;
+    }
+    const text = normalizeWatchText(el.text() || "");
+    if (!text || text.length < 30) {
+      return;
+    }
+    const normalized = text.toLowerCase();
+    if (paragraphSet.has(normalized)) {
+      return;
+    }
+    paragraphSet.add(normalized);
+    paragraphs.push(text);
+  });
+
+  const wordCount = paragraphs.length
+    ? paragraphs
+        .join(" ")
+        .split(/\s+/)
+        .filter(Boolean).length
+    : 0;
+
+  return {
+    title,
+    description,
+    headings,
+    paragraphs,
+    wordCount,
+  };
+}
+
+function buildPageWatchNormalizedContent(metadata) {
+  const parts = [];
+  if (metadata && typeof metadata.title === "string") {
+    parts.push(metadata.title);
+  }
+  if (metadata && typeof metadata.description === "string") {
+    parts.push(metadata.description);
+  }
+  if (metadata && Array.isArray(metadata.headings)) {
+    parts.push(...metadata.headings);
+  }
+  if (metadata && Array.isArray(metadata.paragraphs)) {
+    parts.push(...metadata.paragraphs);
+  }
+  return parts.join("\n").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function buildNormalizedValueMap(values) {
+  const map = new Map();
+  if (!Array.isArray(values)) {
+    return map;
+  }
+  for (const item of values) {
+    const text = normalizeWatchText(typeof item === "string" ? item : "");
+    if (!text) {
+      continue;
+    }
+    const normalized = text.toLowerCase();
+    if (!map.has(normalized)) {
+      map.set(normalized, text);
+    }
+  }
+  return map;
+}
+
+function diffNormalizedValues(previousValues, currentValues) {
+  const previousMap = buildNormalizedValueMap(previousValues);
+  const currentMap = buildNormalizedValueMap(currentValues);
+  const added = [];
+  const removed = [];
+
+  for (const [normalized, value] of currentMap.entries()) {
+    if (!previousMap.has(normalized)) {
+      added.push(value);
+    }
+  }
+  for (const [normalized, value] of previousMap.entries()) {
+    if (!currentMap.has(normalized)) {
+      removed.push(value);
+    }
+  }
+
+  return { added, removed };
+}
+
+function buildPageWatchDiffSummary(previousMetadata, currentMetadata) {
+  const prev = previousMetadata && typeof previousMetadata === "object" ? previousMetadata : {};
+  const next = currentMetadata && typeof currentMetadata === "object" ? currentMetadata : {};
+  const titleChanged = normalizeWatchText(prev.title || "") !== normalizeWatchText(next.title || "");
+  const descriptionChanged =
+    normalizeWatchText(prev.description || "") !== normalizeWatchText(next.description || "");
+  const headingDiff = diffNormalizedValues(prev.headings, next.headings);
+  const paragraphDiff = diffNormalizedValues(prev.paragraphs, next.paragraphs);
+  const previousWordCount = Number.isFinite(Number(prev.wordCount)) ? Number(prev.wordCount) : 0;
+  const currentWordCount = Number.isFinite(Number(next.wordCount)) ? Number(next.wordCount) : 0;
+  const wordDelta = currentWordCount - previousWordCount;
+  const paragraphChangeCount = paragraphDiff.added.length + paragraphDiff.removed.length;
+  const baseParagraphCount = Math.max(
+    1,
+    Array.isArray(prev.paragraphs) ? prev.paragraphs.length : 0
+  );
+  const paragraphChangePercent = (paragraphChangeCount / baseParagraphCount) * 100;
+
+  let severity = "minor";
+  if (titleChanged) {
+    severity = "critical";
+  } else if (
+    descriptionChanged ||
+    headingDiff.added.length > 0 ||
+    headingDiff.removed.length > 0 ||
+    paragraphChangePercent >= 5
+  ) {
+    severity = "major";
+  }
+
+  return {
+    severity,
+    titleChanged,
+    descriptionChanged,
+    wordDelta,
+    previousWordCount,
+    currentWordCount,
+    headingChanges: {
+      addedCount: headingDiff.added.length,
+      removedCount: headingDiff.removed.length,
+      added: headingDiff.added.slice(0, 15),
+      removed: headingDiff.removed.slice(0, 15),
+    },
+    paragraphChanges: {
+      addedCount: paragraphDiff.added.length,
+      removedCount: paragraphDiff.removed.length,
+      changedPercent: Number(paragraphChangePercent.toFixed(2)),
+      added: paragraphDiff.added.slice(0, 20),
+      removed: paragraphDiff.removed.slice(0, 20),
+    },
+  };
+}
+
+function mapPageWatchRow(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    id: row.id,
+    url: row.url,
+    sitemapUrl: row.sitemap_url || "",
+    isActive: Boolean(row.is_active),
+    checkFrequencyMinutes: Number(row.check_frequency_minutes) || PAGE_WATCH_DEFAULT_FREQUENCY_MINUTES,
+    notificationPreferences: safeParseJson(row.notification_preferences_json, null),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastCheckedAt: row.last_checked_at || null,
+    baselineSnapshotId: row.baseline_snapshot_id || null,
+    latestSnapshotId: row.latest_snapshot_id || null,
+    snapshotCount: Number(row.snapshot_count) || 0,
+    diffCount: Number(row.diff_count) || 0,
+    latestStatusCode:
+      row.latest_status_code === null || row.latest_status_code === undefined
+        ? null
+        : Number.isFinite(Number(row.latest_status_code))
+        ? Number(row.latest_status_code)
+        : null,
+    latestFetchedAt: row.latest_fetched_at || null,
+    latestDiffAt: row.latest_diff_at || null,
+    latestDiffSeverity: row.latest_diff_severity || null,
+  };
+}
+
+function getPageWatchRow(db, watchId) {
+  return db.prepare(`
+    SELECT
+      w.*,
+      (
+        SELECT COUNT(1)
+        FROM page_watch_snapshots s
+        WHERE s.watch_id = w.id
+      ) AS snapshot_count,
+      (
+        SELECT COUNT(1)
+        FROM page_watch_diffs d
+        WHERE d.watch_id = w.id
+      ) AS diff_count,
+      (
+        SELECT s.status_code
+        FROM page_watch_snapshots s
+        WHERE s.id = w.latest_snapshot_id
+      ) AS latest_status_code,
+      (
+        SELECT s.fetched_at
+        FROM page_watch_snapshots s
+        WHERE s.id = w.latest_snapshot_id
+      ) AS latest_fetched_at,
+      (
+        SELECT d.detected_at
+        FROM page_watch_diffs d
+        WHERE d.watch_id = w.id
+        ORDER BY d.detected_at DESC, d.id DESC
+        LIMIT 1
+      ) AS latest_diff_at,
+      (
+        SELECT d.severity
+        FROM page_watch_diffs d
+        WHERE d.watch_id = w.id
+        ORDER BY d.detected_at DESC, d.id DESC
+        LIMIT 1
+      ) AS latest_diff_severity
+    FROM page_watches w
+    WHERE w.id = ?
+  `).get(watchId);
+}
+
+async function runPageWatchCheck(watchId, { force = false } = {}) {
+  const db = initScanDb();
+  const watch = db.prepare("SELECT * FROM page_watches WHERE id = ?").get(watchId);
+  if (!watch) {
+    throw new Error("Watch bulunamadi.");
+  }
+  if (!watch.is_active && !force) {
+    return {
+      ok: true,
+      changed: false,
+      reason: "inactive",
+      watch: mapPageWatchRow(getPageWatchRow(db, watchId)),
+    };
+  }
+
+  const previousSnapshot = db
+    .prepare(`
+      SELECT *
+      FROM page_watch_snapshots
+      WHERE watch_id = ?
+      ORDER BY fetched_at DESC, id DESC
+      LIMIT 1
+    `)
+    .get(watchId);
+
+  const conditionalHeaders = {};
+  if (!force && previousSnapshot && typeof previousSnapshot.etag === "string" && previousSnapshot.etag.trim()) {
+    conditionalHeaders["If-None-Match"] = previousSnapshot.etag.trim();
+  }
+  if (
+    !force &&
+    previousSnapshot &&
+    typeof previousSnapshot.last_modified === "string" &&
+    previousSnapshot.last_modified.trim()
+  ) {
+    conditionalHeaders["If-Modified-Since"] = previousSnapshot.last_modified.trim();
+  }
+
+  const fetchedAt = new Date().toISOString();
+  const fetchResult = await fetchPageHtmlWithRetry(watch.url, {
+    allowNotModified: true,
+    headers: conditionalHeaders,
+  });
+
+  if (fetchResult.statusCode === 304) {
+    db.prepare(`
+      UPDATE page_watches
+      SET last_checked_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(fetchedAt, fetchedAt, watchId);
+    return {
+      ok: true,
+      changed: false,
+      reason: "not_modified",
+      statusCode: 304,
+      watch: mapPageWatchRow(getPageWatchRow(db, watchId)),
+    };
+  }
+
+  const html = typeof fetchResult.html === "string" ? fetchResult.html : "";
+  const metadata = extractPageWatchMetadata(html);
+  const normalizedContent = buildPageWatchNormalizedContent(metadata);
+  const rawHash = crypto.createHash("sha256").update(html, "utf8").digest("hex");
+  const normalizedHash = crypto.createHash("sha256").update(normalizedContent, "utf8").digest("hex");
+
+  if (
+    previousSnapshot &&
+    typeof previousSnapshot.normalized_hash === "string" &&
+    previousSnapshot.normalized_hash &&
+    previousSnapshot.normalized_hash === normalizedHash
+  ) {
+    db.prepare(`
+      UPDATE page_watches
+      SET last_checked_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(fetchedAt, fetchedAt, watchId);
+    return {
+      ok: true,
+      changed: false,
+      reason: "identical_content",
+      statusCode: fetchResult.statusCode || null,
+      watch: mapPageWatchRow(getPageWatchRow(db, watchId)),
+    };
+  }
+
+  let rawHtmlGzip = null;
+  if (html) {
+    const htmlSize = Buffer.byteLength(html, "utf8");
+    if (htmlSize <= PAGE_WATCH_MAX_STORED_HTML_BYTES) {
+      rawHtmlGzip = zlib.gzipSync(Buffer.from(html, "utf8"));
+    }
+  }
+
+  const metadataJson = JSON.stringify(metadata);
+  const insertSnapshot = db.prepare(`
+    INSERT INTO page_watch_snapshots (
+      watch_id,
+      fetched_at,
+      status_code,
+      etag,
+      last_modified,
+      raw_hash,
+      normalized_hash,
+      metadata_json,
+      normalized_content,
+      raw_html_gzip,
+      fetch_mode
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    watchId,
+    fetchedAt,
+    Number.isFinite(Number(fetchResult.statusCode)) ? Number(fetchResult.statusCode) : null,
+    typeof fetchResult.etag === "string" ? fetchResult.etag : "",
+    typeof fetchResult.lastModified === "string" ? fetchResult.lastModified : "",
+    rawHash,
+    normalizedHash,
+    metadataJson,
+    normalizedContent,
+    rawHtmlGzip,
+    typeof fetchResult.fetchMode === "string" ? fetchResult.fetchMode : ""
+  );
+  const snapshotId = Number(insertSnapshot.lastInsertRowid);
+
+  let diff = null;
+  if (previousSnapshot) {
+    const previousMetadata = safeParseJson(previousSnapshot.metadata_json, {});
+    const diffSummary = buildPageWatchDiffSummary(previousMetadata, metadata);
+    const diffInsert = db.prepare(`
+      INSERT INTO page_watch_diffs (
+        watch_id,
+        prev_snapshot_id,
+        curr_snapshot_id,
+        detected_at,
+        severity,
+        summary_json,
+        patch_json,
+        is_notified,
+        notified_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)
+    `).run(
+      watchId,
+      previousSnapshot.id,
+      snapshotId,
+      fetchedAt,
+      diffSummary.severity || "minor",
+      JSON.stringify(diffSummary),
+      null
+    );
+    diff = {
+      id: Number(diffInsert.lastInsertRowid),
+      ...diffSummary,
+    };
+  }
+
+  const baselineSnapshotId = watch.baseline_snapshot_id || snapshotId;
+  db.prepare(`
+    UPDATE page_watches
+    SET baseline_snapshot_id = ?,
+        latest_snapshot_id = ?,
+        last_checked_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(baselineSnapshotId, snapshotId, fetchedAt, fetchedAt, watchId);
+
+  return {
+    ok: true,
+    changed: true,
+    reason: previousSnapshot ? "content_changed" : "initial_snapshot",
+    statusCode: Number.isFinite(Number(fetchResult.statusCode)) ? Number(fetchResult.statusCode) : null,
+    snapshotId,
+    diff,
+    watch: mapPageWatchRow(getPageWatchRow(db, watchId)),
+  };
+}
+
+function sleepMs(ms) {
+  if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => setTimeout(resolve, Number(ms)));
+}
+
+function getDuePageWatches(limit = PAGE_WATCH_SCHEDULER_BATCH_SIZE) {
+  const safeLimit = Number.isFinite(Number(limit))
+    ? Math.max(1, Math.min(Math.floor(Number(limit)), 200))
+    : PAGE_WATCH_SCHEDULER_BATCH_SIZE;
+  const db = initScanDb();
+  return db.prepare(`
+    SELECT
+      id,
+      url,
+      check_frequency_minutes AS checkFrequencyMinutes,
+      last_checked_at AS lastCheckedAt
+    FROM page_watches
+    WHERE is_active = 1
+      AND (
+        last_checked_at IS NULL
+        OR datetime(last_checked_at) <= datetime('now', '-' || check_frequency_minutes || ' minutes')
+      )
+    ORDER BY
+      CASE WHEN last_checked_at IS NULL THEN 0 ELSE 1 END,
+      datetime(last_checked_at) ASC,
+      id ASC
+    LIMIT ?
+  `).all(safeLimit);
+}
+
+function getPageWatchSchedulerSnapshot() {
+  return {
+    enabled: PAGE_WATCH_SCHEDULER_ENABLED,
+    intervalMs: PAGE_WATCH_SCHEDULER_INTERVAL_MS,
+    batchSize: PAGE_WATCH_SCHEDULER_BATCH_SIZE,
+    delayMs: PAGE_WATCH_SCHEDULER_DELAY_MS,
+    isRunning: Boolean(pageWatchSchedulerState.isRunning),
+    currentBatch: [...(pageWatchSchedulerState.currentBatch || [])],
+    stats: {
+      ...(pageWatchSchedulerState.stats || {}),
+    },
+  };
+}
+
+async function runPageWatchSchedulerCycle({ silent = false } = {}) {
+  if (!PAGE_WATCH_SCHEDULER_ENABLED) {
+    return { ok: false, skipped: "disabled" };
+  }
+  if (isShuttingDown) {
+    return { ok: false, skipped: "shutting_down" };
+  }
+  if (pageWatchSchedulerState.isRunning) {
+    pageWatchSchedulerState.stats.skippedRuns += 1;
+    return { ok: false, skipped: "already_running" };
+  }
+
+  const startedAt = new Date().toISOString();
+  const startedAtMs = Date.now();
+  pageWatchSchedulerState.isRunning = true;
+  pageWatchSchedulerState.stats.lastStartedAt = startedAt;
+  pageWatchSchedulerState.stats.lastError = null;
+  pageWatchSchedulerState.stats.lastBatchSize = 0;
+  pageWatchSchedulerState.stats.lastProcessedCount = 0;
+
+  try {
+    const dueWatches = getDuePageWatches(PAGE_WATCH_SCHEDULER_BATCH_SIZE);
+    pageWatchSchedulerState.currentBatch = dueWatches
+      .map((row) => Number(row && row.id))
+      .filter((id) => Number.isFinite(id));
+    pageWatchSchedulerState.stats.lastBatchSize = dueWatches.length;
+
+    for (const watch of dueWatches) {
+      if (!watch || !Number.isFinite(Number(watch.id))) {
+        continue;
+      }
+      if (isShuttingDown) {
+        break;
+      }
+
+      const parsedWatchId = Number(watch.id);
+      try {
+        const result = await runPageWatchCheck(parsedWatchId, { force: false });
+        pageWatchSchedulerState.stats.totalChecks += 1;
+        pageWatchSchedulerState.stats.successfulChecks += 1;
+        pageWatchSchedulerState.stats.lastProcessedCount += 1;
+        if (result && result.changed) {
+          pageWatchSchedulerState.stats.changesDetected += 1;
+        }
+      } catch (error) {
+        const message = error && error.message ? error.message : "Unknown page watch error";
+        pageWatchSchedulerState.stats.totalChecks += 1;
+        pageWatchSchedulerState.stats.failedChecks += 1;
+        pageWatchSchedulerState.stats.lastProcessedCount += 1;
+        pageWatchSchedulerState.stats.lastError = message;
+        if (!silent) {
+          console.warn(`[Page Watch] Check failed (${watch.url || parsedWatchId}):`, message);
+        }
+      }
+
+      if (!isShuttingDown && PAGE_WATCH_SCHEDULER_DELAY_MS > 0) {
+        const jitter = PAGE_WATCH_SCHEDULER_DELAY_MS >= 250 ? Math.floor(Math.random() * 250) : 0;
+        await sleepMs(PAGE_WATCH_SCHEDULER_DELAY_MS + jitter);
+      }
+    }
+
+    return {
+      ok: true,
+      batchSize: dueWatches.length,
+      processed: pageWatchSchedulerState.stats.lastProcessedCount,
+    };
+  } catch (error) {
+    const message = error && error.message ? error.message : "Page watch scheduler failed";
+    pageWatchSchedulerState.stats.lastError = message;
+    if (!silent) {
+      console.warn("[Page Watch] Scheduler cycle failed:", message);
+    }
+    return { ok: false, error: message };
+  } finally {
+    pageWatchSchedulerState.isRunning = false;
+    pageWatchSchedulerState.currentBatch = [];
+    pageWatchSchedulerState.stats.lastFinishedAt = new Date().toISOString();
+    pageWatchSchedulerState.stats.lastDurationMs = Date.now() - startedAtMs;
+  }
+}
+
+function startPageWatchScheduler() {
+  if (!PAGE_WATCH_SCHEDULER_ENABLED) {
+    console.log("Page watch scheduler devre disi.");
+    return;
+  }
+
+  if (pageWatchSchedulerTimer) {
+    clearInterval(pageWatchSchedulerTimer);
+    pageWatchSchedulerTimer = null;
+  }
+
+  runPageWatchSchedulerCycle({ silent: true }).catch((error) => {
+    console.warn("Page watch scheduler warmup failed:", error && error.message ? error.message : error);
+  });
+
+  pageWatchSchedulerTimer = setInterval(() => {
+    runPageWatchSchedulerCycle({ silent: true }).catch((error) => {
+      console.warn("Page watch scheduler run failed:", error && error.message ? error.message : error);
+    });
+  }, PAGE_WATCH_SCHEDULER_INTERVAL_MS);
+  if (pageWatchSchedulerTimer && typeof pageWatchSchedulerTimer.unref === "function") {
+    pageWatchSchedulerTimer.unref();
+  }
+
+  console.log(
+    `Page watch scheduler aktif: interval=${PAGE_WATCH_SCHEDULER_INTERVAL_MS}ms, batch=${PAGE_WATCH_SCHEDULER_BATCH_SIZE}, delay=${PAGE_WATCH_SCHEDULER_DELAY_MS}ms`
+  );
 }
 
 async function readHealthHistory() {
@@ -6893,6 +7663,12 @@ app.get("/api/fetch-page", requireAuth, async (req, res, next) => {
     if (result.fetchMode) {
       res.set("X-Page-Fetch", result.fetchMode);
     }
+    if (result.etag) {
+      res.set("X-Page-Etag", result.etag);
+    }
+    if (result.lastModified) {
+      res.set("X-Page-Last-Modified", result.lastModified);
+    }
     res.send(result.html || "");
   } catch (error) {
     if (error instanceof SitemapFetchError) {
@@ -6915,6 +7691,694 @@ app.get("/api/fetch-page", requireAuth, async (req, res, next) => {
     next(error);
   }
 });
+
+app.post("/api/watches", requireAuth, async (req, res, next) => {
+  try {
+    const { url, sitemapUrl, isActive, checkFrequencyMinutes, notificationPreferences, initialize } =
+      req.body || {};
+    if (typeof url !== "string" || !url.trim()) {
+      res.status(400).json({ message: "Gecerli bir URL gerekli." });
+      return;
+    }
+
+    let normalizedUrl = normalizeUrl(url);
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(normalizedUrl);
+    } catch (_error) {
+      res.status(400).json({ message: "Gecerli bir URL gerekli." });
+      return;
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      res.status(400).json({ message: "Sadece HTTP veya HTTPS adresleri desteklenir." });
+      return;
+    }
+    normalizedUrl = parsedUrl.href;
+    try {
+      await assertPublicUrl(normalizedUrl);
+    } catch (error) {
+      res.status(400).json({ message: error?.message || "URL engellendi." });
+      return;
+    }
+
+    let normalizedSitemapUrl = null;
+    if (typeof sitemapUrl === "string" && sitemapUrl.trim()) {
+      const maybeUrl = normalizeUrl(sitemapUrl);
+      try {
+        const parsedSitemap = new URL(maybeUrl);
+        if (parsedSitemap.protocol !== "http:" && parsedSitemap.protocol !== "https:") {
+          res.status(400).json({ message: "Sitemap URL'i HTTP veya HTTPS olmali." });
+          return;
+        }
+        normalizedSitemapUrl = parsedSitemap.href;
+      } catch (_error) {
+        res.status(400).json({ message: "Gecerli bir sitemap URL'i gerekli." });
+        return;
+      }
+    }
+
+    const safeActive = isActive === undefined ? 1 : isActive ? 1 : 0;
+    const safeFrequency = normalizeWatchFrequencyMinutes(checkFrequencyMinutes);
+    const safePreferences = normalizeWatchNotificationPreferences(notificationPreferences);
+    const now = new Date().toISOString();
+    const db = initScanDb();
+
+    const upsert = db.transaction(() => {
+      const existing = db
+        .prepare("SELECT id FROM page_watches WHERE url = ?")
+        .get(normalizedUrl);
+      if (existing) {
+        db.prepare(`
+          UPDATE page_watches
+          SET sitemap_url = COALESCE(?, sitemap_url),
+              is_active = ?,
+              check_frequency_minutes = ?,
+              notification_preferences_json = COALESCE(?, notification_preferences_json),
+              updated_at = ?
+          WHERE id = ?
+        `).run(
+          normalizedSitemapUrl,
+          safeActive,
+          safeFrequency,
+          safePreferences ? JSON.stringify(safePreferences) : null,
+          now,
+          existing.id
+        );
+        return { id: existing.id, created: false };
+      }
+
+      const inserted = db.prepare(`
+        INSERT INTO page_watches (
+          url,
+          sitemap_url,
+          is_active,
+          check_frequency_minutes,
+          notification_preferences_json,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        normalizedUrl,
+        normalizedSitemapUrl,
+        safeActive,
+        safeFrequency,
+        safePreferences ? JSON.stringify(safePreferences) : null,
+        now,
+        now
+      );
+      return { id: Number(inserted.lastInsertRowid), created: true };
+    });
+
+    const upserted = upsert();
+    const shouldInitialize = initialize !== false;
+    let checkResult = null;
+    if (shouldInitialize) {
+      checkResult = await runPageWatchCheck(upserted.id, { force: true });
+    }
+
+    res.status(upserted.created ? 201 : 200).json({
+      ok: true,
+      created: upserted.created,
+      watch: mapPageWatchRow(getPageWatchRow(db, upserted.id)),
+      check: checkResult,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/watches", requireAuth, async (req, res, next) => {
+  try {
+    const activeQuery = String(req.query?.active || "").trim().toLowerCase();
+    const sitemapUrlQuery = typeof req.query?.sitemapUrl === "string" ? req.query.sitemapUrl.trim() : "";
+    const whereParts = [];
+    const params = [];
+    if (activeQuery === "1" || activeQuery === "true") {
+      whereParts.push("w.is_active = 1");
+    } else if (activeQuery === "0" || activeQuery === "false") {
+      whereParts.push("w.is_active = 0");
+    }
+    if (sitemapUrlQuery) {
+      const normalizedSitemapUrl = normalizeUrl(sitemapUrlQuery);
+      if (!normalizedSitemapUrl) {
+        res.status(400).json({ message: "Gecerli bir sitemap URL'i gerekli." });
+        return;
+      }
+      whereParts.push("w.sitemap_url = ?");
+      params.push(normalizedSitemapUrl);
+    }
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const db = initScanDb();
+    const rows = db.prepare(`
+      SELECT
+        w.*,
+        (
+          SELECT COUNT(1)
+          FROM page_watch_snapshots s
+          WHERE s.watch_id = w.id
+        ) AS snapshot_count,
+        (
+          SELECT COUNT(1)
+          FROM page_watch_diffs d
+          WHERE d.watch_id = w.id
+        ) AS diff_count,
+        (
+          SELECT s.status_code
+          FROM page_watch_snapshots s
+          WHERE s.id = w.latest_snapshot_id
+        ) AS latest_status_code,
+        (
+          SELECT s.fetched_at
+          FROM page_watch_snapshots s
+          WHERE s.id = w.latest_snapshot_id
+        ) AS latest_fetched_at,
+        (
+          SELECT d.detected_at
+          FROM page_watch_diffs d
+          WHERE d.watch_id = w.id
+          ORDER BY d.detected_at DESC, d.id DESC
+          LIMIT 1
+        ) AS latest_diff_at,
+        (
+          SELECT d.severity
+          FROM page_watch_diffs d
+          WHERE d.watch_id = w.id
+          ORDER BY d.detected_at DESC, d.id DESC
+          LIMIT 1
+        ) AS latest_diff_severity
+      FROM page_watches w
+      ${whereSql}
+      ORDER BY w.updated_at DESC, w.id DESC
+    `).all(...params);
+
+    res.json((rows || []).map(mapPageWatchRow));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/watches/unread-diffs", requireAuth, async (req, res, next) => {
+  try {
+    const limit = Number.isFinite(Number(req.query?.limit))
+      ? Math.min(Math.max(Number(req.query.limit), 1), 200)
+      : 50;
+    const unreadQuery = String(req.query?.unread || "").trim().toLowerCase();
+    const onlyUnread = unreadQuery === "1" || unreadQuery === "true";
+    const whereParts = [];
+    const params = [];
+
+    const watchIdQuery = Number(req.query?.watchId);
+    if (Number.isFinite(watchIdQuery)) {
+      whereParts.push("d.watch_id = ?");
+      params.push(watchIdQuery);
+    } else if (req.query?.watchId !== undefined && req.query?.watchId !== "") {
+      res.status(400).json({ message: "Gecerli bir watch ID gerekli." });
+      return;
+    }
+
+    const sitemapUrlQuery = typeof req.query?.sitemapUrl === "string" ? req.query.sitemapUrl.trim() : "";
+    if (sitemapUrlQuery) {
+      let normalizedSitemapUrl;
+      try {
+        const parsed = new URL(normalizeUrl(sitemapUrlQuery));
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          res.status(400).json({ message: "Sitemap URL'i HTTP veya HTTPS olmali." });
+          return;
+        }
+        normalizedSitemapUrl = parsed.href;
+      } catch (_error) {
+        res.status(400).json({ message: "Gecerli bir sitemap URL'i gerekli." });
+        return;
+      }
+      whereParts.push("w.sitemap_url = ?");
+      params.push(normalizedSitemapUrl);
+    }
+
+    if (onlyUnread) {
+      whereParts.push("d.is_notified = 0");
+    }
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const db = initScanDb();
+    const rows = db.prepare(`
+      SELECT
+        d.id,
+        d.watch_id AS watchId,
+        d.prev_snapshot_id AS prevSnapshotId,
+        d.curr_snapshot_id AS currSnapshotId,
+        d.detected_at AS detectedAt,
+        d.severity,
+        d.summary_json AS summaryJson,
+        d.is_notified AS isNotified,
+        d.notified_at AS notifiedAt,
+        w.url,
+        w.sitemap_url AS sitemapUrl,
+        prev.fetched_at AS prevFetchedAt,
+        curr.fetched_at AS currFetchedAt
+      FROM page_watch_diffs d
+      JOIN page_watches w ON w.id = d.watch_id
+      LEFT JOIN page_watch_snapshots prev ON prev.id = d.prev_snapshot_id
+      LEFT JOIN page_watch_snapshots curr ON curr.id = d.curr_snapshot_id
+      ${whereSql}
+      ORDER BY d.detected_at DESC, d.id DESC
+      LIMIT ?
+    `).all(...params, limit);
+
+    res.json(
+      (rows || []).map((row) => ({
+        id: row.id,
+        watchId: row.watchId,
+        url: row.url || "",
+        sitemapUrl: row.sitemapUrl || "",
+        prevSnapshotId: row.prevSnapshotId || null,
+        currSnapshotId: row.currSnapshotId || null,
+        detectedAt: row.detectedAt || "",
+        severity: row.severity || "minor",
+        summary: safeParseJson(row.summaryJson, null),
+        isNotified: Boolean(row.isNotified),
+        notifiedAt: row.notifiedAt || null,
+        prevFetchedAt: row.prevFetchedAt || null,
+        currFetchedAt: row.currFetchedAt || null,
+      }))
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/watches/scheduler-stats", requireAuth, async (req, res, next) => {
+  try {
+    res.json(getPageWatchSchedulerSnapshot());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/watches/:id", requireAuth, async (req, res, next) => {
+  try {
+    const parsedId = Number(req.params?.id);
+    if (!Number.isFinite(parsedId)) {
+      res.status(400).json({ message: "Gecerli bir watch ID gerekli." });
+      return;
+    }
+
+    const { isActive, checkFrequencyMinutes, notificationPreferences, sitemapUrl } = req.body || {};
+    const updates = [];
+    const params = [];
+
+    if (isActive !== undefined) {
+      updates.push("is_active = ?");
+      params.push(isActive ? 1 : 0);
+    }
+    if (checkFrequencyMinutes !== undefined) {
+      updates.push("check_frequency_minutes = ?");
+      params.push(normalizeWatchFrequencyMinutes(checkFrequencyMinutes));
+    }
+    if (notificationPreferences !== undefined) {
+      const safePreferences = normalizeWatchNotificationPreferences(notificationPreferences);
+      updates.push("notification_preferences_json = ?");
+      params.push(safePreferences ? JSON.stringify(safePreferences) : null);
+    }
+    if (sitemapUrl !== undefined) {
+      if (sitemapUrl === null || sitemapUrl === "") {
+        updates.push("sitemap_url = NULL");
+      } else if (typeof sitemapUrl === "string") {
+        let normalizedSitemapUrl = normalizeUrl(sitemapUrl);
+        try {
+          const parsed = new URL(normalizedSitemapUrl);
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+            res.status(400).json({ message: "Sitemap URL'i HTTP veya HTTPS olmali." });
+            return;
+          }
+          normalizedSitemapUrl = parsed.href;
+        } catch (_error) {
+          res.status(400).json({ message: "Gecerli bir sitemap URL'i gerekli." });
+          return;
+        }
+        updates.push("sitemap_url = ?");
+        params.push(normalizedSitemapUrl);
+      } else {
+        res.status(400).json({ message: "Gecerli bir sitemap URL'i gerekli." });
+        return;
+      }
+    }
+
+    if (!updates.length) {
+      res.status(400).json({ message: "Guncellenecek en az bir alan gerekli." });
+      return;
+    }
+
+    updates.push("updated_at = ?");
+    params.push(new Date().toISOString());
+    params.push(parsedId);
+
+    const db = initScanDb();
+    const result = db.prepare(`
+      UPDATE page_watches
+      SET ${updates.join(", ")}
+      WHERE id = ?
+    `).run(...params);
+    if (!result.changes) {
+      res.status(404).json({ message: "Watch bulunamadi." });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      watch: mapPageWatchRow(getPageWatchRow(db, parsedId)),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/watches/diffs/:id/mark-read", requireAuth, async (req, res, next) => {
+  try {
+    const parsedId = Number(req.params?.id);
+    if (!Number.isFinite(parsedId)) {
+      res.status(400).json({ message: "Gecerli bir diff ID gerekli." });
+      return;
+    }
+
+    const notifiedAt = new Date().toISOString();
+    const db = initScanDb();
+    const result = db.prepare(`
+      UPDATE page_watch_diffs
+      SET is_notified = 1,
+          notified_at = COALESCE(notified_at, ?)
+      WHERE id = ?
+    `).run(notifiedAt, parsedId);
+
+    if (!result.changes) {
+      res.status(404).json({ message: "Diff bulunamadi." });
+      return;
+    }
+
+    res.json({ ok: true, notifiedAt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/watches/diffs/mark-all-read", requireAuth, async (req, res, next) => {
+  try {
+    const { watchId, sitemapUrl } = req.body || {};
+    const whereParts = ["is_notified = 0"];
+    const params = [];
+
+    if (watchId !== undefined && watchId !== null && watchId !== "") {
+      const parsedWatchId = Number(watchId);
+      if (!Number.isFinite(parsedWatchId)) {
+        res.status(400).json({ message: "Gecerli bir watch ID gerekli." });
+        return;
+      }
+      whereParts.push("watch_id = ?");
+      params.push(parsedWatchId);
+    }
+
+    if (typeof sitemapUrl === "string" && sitemapUrl.trim()) {
+      let normalizedSitemapUrl;
+      try {
+        const parsed = new URL(normalizeUrl(sitemapUrl));
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          res.status(400).json({ message: "Sitemap URL'i HTTP veya HTTPS olmali." });
+          return;
+        }
+        normalizedSitemapUrl = parsed.href;
+      } catch (_error) {
+        res.status(400).json({ message: "Gecerli bir sitemap URL'i gerekli." });
+        return;
+      }
+      whereParts.push(`
+        watch_id IN (
+          SELECT id
+          FROM page_watches
+          WHERE sitemap_url = ?
+        )
+      `);
+      params.push(normalizedSitemapUrl);
+    }
+
+    const notifiedAt = new Date().toISOString();
+    const db = initScanDb();
+    const result = db.prepare(`
+      UPDATE page_watch_diffs
+      SET is_notified = 1,
+          notified_at = COALESCE(notified_at, ?)
+      WHERE ${whereParts.join(" AND ")}
+    `).run(notifiedAt, ...params);
+
+    res.json({
+      ok: true,
+      updated: Number(result.changes) || 0,
+      notifiedAt,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/watches/:id", requireAuth, async (req, res, next) => {
+  try {
+    const parsedId = Number(req.params?.id);
+    if (!Number.isFinite(parsedId)) {
+      res.status(400).json({ message: "Gecerli bir watch ID gerekli." });
+      return;
+    }
+    const db = initScanDb();
+    const result = db.prepare("DELETE FROM page_watches WHERE id = ?").run(parsedId);
+    if (!result.changes) {
+      res.status(404).json({ message: "Watch bulunamadi." });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/watches/:id/snapshots", requireAuth, async (req, res, next) => {
+  try {
+    const parsedId = Number(req.params?.id);
+    if (!Number.isFinite(parsedId)) {
+      res.status(400).json({ message: "Gecerli bir watch ID gerekli." });
+      return;
+    }
+    const limit = Number.isFinite(Number(req.query?.limit))
+      ? Math.min(Math.max(Number(req.query.limit), 1), 200)
+      : 50;
+    const db = initScanDb();
+    const watch = db.prepare("SELECT id FROM page_watches WHERE id = ?").get(parsedId);
+    if (!watch) {
+      res.status(404).json({ message: "Watch bulunamadi." });
+      return;
+    }
+    const rows = db.prepare(`
+      SELECT
+        id,
+        watch_id AS watchId,
+        fetched_at AS fetchedAt,
+        status_code AS statusCode,
+        etag,
+        last_modified AS lastModified,
+        raw_hash AS rawHash,
+        normalized_hash AS normalizedHash,
+        metadata_json AS metadataJson,
+        fetch_mode AS fetchMode,
+        CASE
+          WHEN raw_html_gzip IS NULL THEN 0
+          ELSE LENGTH(raw_html_gzip)
+        END AS rawHtmlGzipBytes
+      FROM page_watch_snapshots
+      WHERE watch_id = ?
+      ORDER BY fetched_at DESC, id DESC
+      LIMIT ?
+    `).all(parsedId, limit);
+
+    res.json(
+      (rows || []).map((row) => ({
+        id: row.id,
+        watchId: row.watchId,
+        fetchedAt: row.fetchedAt,
+        statusCode:
+          row.statusCode === null || row.statusCode === undefined
+            ? null
+            : Number.isFinite(Number(row.statusCode))
+            ? Number(row.statusCode)
+            : null,
+        etag: row.etag || "",
+        lastModified: row.lastModified || "",
+        rawHash: row.rawHash || "",
+        normalizedHash: row.normalizedHash || "",
+        metadata: safeParseJson(row.metadataJson, null),
+        fetchMode: row.fetchMode || "",
+        rawHtmlGzipBytes: Number(row.rawHtmlGzipBytes) || 0,
+      }))
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/watches/:id/diffs", requireAuth, async (req, res, next) => {
+  try {
+    const parsedId = Number(req.params?.id);
+    if (!Number.isFinite(parsedId)) {
+      res.status(400).json({ message: "Gecerli bir watch ID gerekli." });
+      return;
+    }
+    const limit = Number.isFinite(Number(req.query?.limit))
+      ? Math.min(Math.max(Number(req.query.limit), 1), 200)
+      : 50;
+    const db = initScanDb();
+    const watch = db.prepare("SELECT id FROM page_watches WHERE id = ?").get(parsedId);
+    if (!watch) {
+      res.status(404).json({ message: "Watch bulunamadi." });
+      return;
+    }
+    const rows = db.prepare(`
+      SELECT
+        id,
+        watch_id AS watchId,
+        prev_snapshot_id AS prevSnapshotId,
+        curr_snapshot_id AS currSnapshotId,
+        detected_at AS detectedAt,
+        severity,
+        summary_json AS summaryJson,
+        patch_json AS patchJson,
+        is_notified AS isNotified,
+        notified_at AS notifiedAt
+      FROM page_watch_diffs
+      WHERE watch_id = ?
+      ORDER BY detected_at DESC, id DESC
+      LIMIT ?
+    `).all(parsedId, limit);
+
+    res.json(
+      (rows || []).map((row) => ({
+        id: row.id,
+        watchId: row.watchId,
+        prevSnapshotId: row.prevSnapshotId || null,
+        currSnapshotId: row.currSnapshotId || null,
+        detectedAt: row.detectedAt,
+        severity: row.severity || "minor",
+        summary: safeParseJson(row.summaryJson, null),
+        patch: safeParseJson(row.patchJson, null),
+        isNotified: Boolean(row.isNotified),
+        notifiedAt: row.notifiedAt || null,
+      }))
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/watches/:id/diff/:diffId", requireAuth, async (req, res, next) => {
+  try {
+    const parsedId = Number(req.params?.id);
+    const parsedDiffId = Number(req.params?.diffId);
+    if (!Number.isFinite(parsedId) || !Number.isFinite(parsedDiffId)) {
+      res.status(400).json({ message: "Gecerli watch ve diff ID gerekli." });
+      return;
+    }
+    const db = initScanDb();
+    const row = db.prepare(`
+      SELECT
+        d.id,
+        d.watch_id AS watchId,
+        d.prev_snapshot_id AS prevSnapshotId,
+        d.curr_snapshot_id AS currSnapshotId,
+        d.detected_at AS detectedAt,
+        d.severity,
+        d.summary_json AS summaryJson,
+        d.patch_json AS patchJson,
+        d.is_notified AS isNotified,
+        d.notified_at AS notifiedAt,
+        prev.fetched_at AS prevFetchedAt,
+        prev.status_code AS prevStatusCode,
+        prev.metadata_json AS prevMetadataJson,
+        curr.fetched_at AS currFetchedAt,
+        curr.status_code AS currStatusCode,
+        curr.metadata_json AS currMetadataJson
+      FROM page_watch_diffs d
+      LEFT JOIN page_watch_snapshots prev ON prev.id = d.prev_snapshot_id
+      LEFT JOIN page_watch_snapshots curr ON curr.id = d.curr_snapshot_id
+      WHERE d.watch_id = ?
+        AND d.id = ?
+      LIMIT 1
+    `).get(parsedId, parsedDiffId);
+
+    if (!row) {
+      res.status(404).json({ message: "Diff bulunamadi." });
+      return;
+    }
+
+    res.json({
+      id: row.id,
+      watchId: row.watchId,
+      prevSnapshotId: row.prevSnapshotId || null,
+      currSnapshotId: row.currSnapshotId || null,
+      detectedAt: row.detectedAt,
+      severity: row.severity || "minor",
+      summary: safeParseJson(row.summaryJson, null),
+      patch: safeParseJson(row.patchJson, null),
+      isNotified: Boolean(row.isNotified),
+      notifiedAt: row.notifiedAt || null,
+      previousSnapshot: row.prevSnapshotId
+        ? {
+            id: row.prevSnapshotId,
+            fetchedAt: row.prevFetchedAt || null,
+            statusCode:
+              row.prevStatusCode === null || row.prevStatusCode === undefined
+                ? null
+                : Number.isFinite(Number(row.prevStatusCode))
+                ? Number(row.prevStatusCode)
+                : null,
+            metadata: safeParseJson(row.prevMetadataJson, null),
+          }
+        : null,
+      currentSnapshot: row.currSnapshotId
+        ? {
+            id: row.currSnapshotId,
+            fetchedAt: row.currFetchedAt || null,
+            statusCode:
+              row.currStatusCode === null || row.currStatusCode === undefined
+                ? null
+                : Number.isFinite(Number(row.currStatusCode))
+                ? Number(row.currStatusCode)
+                : null,
+            metadata: safeParseJson(row.currMetadataJson, null),
+          }
+        : null,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/watches/:id/check-now", requireAuth, async (req, res, next) => {
+  try {
+    const parsedId = Number(req.params?.id);
+    if (!Number.isFinite(parsedId)) {
+      res.status(400).json({ message: "Gecerli bir watch ID gerekli." });
+      return;
+    }
+    const force = Boolean(req.body && req.body.force);
+    const db = initScanDb();
+    const watch = db.prepare("SELECT id FROM page_watches WHERE id = ?").get(parsedId);
+    if (!watch) {
+      res.status(404).json({ message: "Watch bulunamadi." });
+      return;
+    }
+
+    const result = await runPageWatchCheck(parsedId, { force });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/fetch-sitemap", requireAuth, async (req, res, next) => {
   const { url } = req.query;
 
@@ -7942,6 +9406,8 @@ async function start() {
     }
   }
 
+  startPageWatchScheduler();
+
   if (CRON_SCHEDULE) {
     cronTask = cron.schedule(CRON_SCHEDULE, () => {
       runScheduledHealthChecks().catch((error) => {
@@ -7968,6 +9434,10 @@ async function start() {
     }
     if (cronTask) {
       cronTask.stop();
+    }
+    if (pageWatchSchedulerTimer) {
+      clearInterval(pageWatchSchedulerTimer);
+      pageWatchSchedulerTimer = null;
     }
     flushLogger();
     if (serverInstance) {
@@ -7997,16 +9467,3 @@ start().catch((error) => {
   console.error("Sunucu baslatilamadi:", error);
   process.exit(1);
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
