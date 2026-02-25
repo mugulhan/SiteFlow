@@ -7115,13 +7115,27 @@ app.post("/api/sitemaps/discover", requireAuth, discoveryLimiter, async (req, re
       guessResults,
       crawlResults,
     ]);
-    const verifiedResults = await annotateCandidateStatuses(deduped);
-    const reachableResults = verifiedResults.filter(
-      (entry) => entry && entry.verification && entry.verification.ok
-    );
-    const expandedResults = await expandSitemapChildren(reachableResults);
-    const combinedResults = dedupeDiscoveryResults([verifiedResults, expandedResults]);
-    const finalResults = combinedResults.map((entry) => {
+    let finalResults = [];
+    if (isFast) {
+      finalResults = deduped.map((candidate) => ({
+        ...candidate,
+        verification: {
+          ok: null,
+          pending: true,
+          statusCode: null,
+          contentType: "",
+          reason: "",
+        },
+      }));
+    } else {
+      const verifiedResults = await annotateCandidateStatuses(deduped);
+      const reachableResults = verifiedResults.filter(
+        (entry) => entry && entry.verification && entry.verification.ok
+      );
+      const expandedResults = await expandSitemapChildren(reachableResults);
+      finalResults = dedupeDiscoveryResults([verifiedResults, expandedResults]);
+    }
+    const publicResults = finalResults.map((entry) => {
       const { xmlText, ...rest } = entry || {};
       return rest;
     });
@@ -7129,7 +7143,7 @@ app.post("/api/sitemaps/discover", requireAuth, discoveryLimiter, async (req, re
     res.json({
       query: normalizedTarget.hostname,
       baseUrl: fallbackOrigin || "",
-      results: finalResults,
+      results: publicResults,
     });
   } catch (error) {
     next(error);

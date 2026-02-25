@@ -102,6 +102,7 @@ const I18N_STRINGS = {
     "finder.status.idle": "Enter a domain to start searching.",
     "finder.status.loading": "Scanning {domain}...",
     "finder.status.success": "{count} candidates found for {domain}.",
+    "finder.status.verifying": "{count} candidates found for {domain}. Verifying...",
     "finder.status.empty": "No sitemap-like URLs were detected for {domain}.",
     "finder.status.error": "Discovery failed: {error}",
     "finder.empty": "No discovery results yet.",
@@ -110,6 +111,7 @@ const I18N_STRINGS = {
     "finder.results.source.guess": "Common path",
     "finder.results.source.child": "Sitemap index",
     "finder.results.added": "Already added",
+    "finder.results.status.pending": "Verifying...",
     "finder.results.status.valid": "Verified",
     "finder.results.status.invalid": "Not reachable",
     "finder.results.status.code": "HTTP {status}",
@@ -484,6 +486,7 @@ const I18N_STRINGS = {
     "finder.status.idle": "Aramayi baslatmak icin alan adi girin.",
     "finder.status.loading": "{domain} taraniyor...",
     "finder.status.success": "{domain} icin {count} aday bulundu.",
+    "finder.status.verifying": "{domain} icin {count} aday bulundu, dogrulaniyor...",
     "finder.status.empty": "{domain} icin sitemap benzeri URL bulunamadi.",
     "finder.status.error": "Kesif basarisiz: {error}",
     "finder.empty": "Henuz sonuc yok.",
@@ -492,6 +495,7 @@ const I18N_STRINGS = {
     "finder.results.source.guess": "Tahmini yol",
     "finder.results.source.child": "Sitemap indeks",
     "finder.results.added": "Listede mevcut",
+    "finder.results.status.pending": "Dogrulaniyor...",
     "finder.results.status.valid": "Dogrulandi",
     "finder.results.status.invalid": "Erisilemedi",
     "finder.results.status.code": "HTTP {status}",
@@ -1579,6 +1583,7 @@ const state = {
   },
   discovery: {
     isLoading: false,
+    isVerifying: false,
     results: [],
     lastQuery: "",
     domain: "",
@@ -1600,6 +1605,7 @@ const detailScanBuffer = {
   headingLinks: [],
 };
 let detailScanRequestId = 0;
+let discoveryRequestId = 0;
 let detailRenderScheduled = false;
 let sitemapAutoRefreshTimer = null;
 const detailMetadataRequests = new Map();
@@ -11584,8 +11590,12 @@ function sanitizeDiscoveryResults(results) {
       continue;
     }
     seen.add(key);
+    const rawVerificationOk = entry?.verification?.ok;
+    const normalizedVerificationOk =
+      rawVerificationOk === true ? true : rawVerificationOk === false ? false : null;
     const verification = {
-      ok: Boolean(entry?.verification?.ok),
+      ok: normalizedVerificationOk,
+      pending: Boolean(entry?.verification?.pending) || normalizedVerificationOk === null,
       statusCode:
         typeof entry?.verification?.statusCode === "number"
           ? entry.verification.statusCode
@@ -11677,6 +11687,17 @@ function activateAdderTab(tabName) {
 
 function formatDiscoveryStatus(entry) {
   const verification = entry?.verification || {};
+  const isPending = Boolean(verification.pending) || verification.ok === null;
+  if (isPending) {
+    return {
+      ok: false,
+      pending: true,
+      tone: "info",
+      text: t("finder.results.status.pending"),
+      codeLabel: null,
+    };
+  }
+
   const reason =
     typeof verification.reason === "string" && verification.reason.trim()
       ? verification.reason.trim()
@@ -11686,6 +11707,8 @@ function formatDiscoveryStatus(entry) {
   if (verification.ok) {
     return {
       ok: true,
+      pending: false,
+      tone: "success",
       text: t("finder.results.status.valid"),
       codeLabel: verification.statusCode
         ? t("finder.results.status.code", { status: verification.statusCode })
@@ -11697,6 +11720,8 @@ function formatDiscoveryStatus(entry) {
     : null;
   return {
     ok: false,
+    pending: false,
+    tone: "error",
     text: reasonLabel || t("finder.results.status.invalid"),
     codeLabel: statusLabel,
   };
@@ -11718,7 +11743,7 @@ function renderDiscoveryResults() {
     return;
   }
   refreshDiscoveryExistingFlags();
-  const { isLoading, results, lastQuery, domain, error } = state.discovery;
+  const { isLoading, isVerifying, results, lastQuery, domain, error } = state.discovery;
   const displayDomain = domain || lastQuery || "";
   let statusKey = "finder.status.idle";
   const replacements = {};
@@ -11729,6 +11754,10 @@ function renderDiscoveryResults() {
   } else if (error) {
     statusKey = "finder.status.error";
     replacements.error = error;
+  } else if (isVerifying && results.length && displayDomain) {
+    statusKey = "finder.status.verifying";
+    replacements.domain = displayDomain;
+    replacements.count = results.length;
   } else if (results.length && displayDomain) {
     statusKey = "finder.status.success";
     replacements.domain = displayDomain;
@@ -11795,13 +11824,17 @@ function renderDiscoveryResults() {
 
       const statusInfo = formatDiscoveryStatus(entry);
       const statusBadge = document.createElement("span");
-      statusBadge.className = `finder__pill ${
-        statusInfo.ok ? "finder__pill--success" : "finder__pill--error"
-      }`;
+      let statusToneClass = "finder__pill--error";
+      if (statusInfo.tone === "success") {
+        statusToneClass = "finder__pill--success";
+      } else if (statusInfo.tone === "info") {
+        statusToneClass = "finder__pill--info";
+      }
+      statusBadge.className = `finder__pill ${statusToneClass}`;
       statusBadge.textContent = statusInfo.text;
       meta.appendChild(statusBadge);
 
-      if (!statusInfo.ok && statusInfo.codeLabel) {
+      if (!statusInfo.ok && !statusInfo.pending && statusInfo.codeLabel) {
         const codeBadge = document.createElement("span");
         codeBadge.className = "finder__pill finder__pill--error";
         codeBadge.textContent = statusInfo.codeLabel;
@@ -11878,12 +11911,15 @@ async function handleDiscoverSubmit(event) {
   }
   const query = discoverInput.value.trim();
   if (!query) {
+    state.discovery.isVerifying = false;
     discoverStatusElement.textContent = t("finder.status.idle");
     discoverInput.focus();
     return;
   }
 
+  const requestId = ++discoveryRequestId;
   state.discovery.isLoading = true;
+  state.discovery.isVerifying = false;
   state.discovery.results = [];
   state.discovery.error = null;
   state.discovery.lastQuery = query;
@@ -11891,37 +11927,72 @@ async function handleDiscoverSubmit(event) {
   renderDiscoveryResults();
 
   try {
-    const response = await fetch(API_DISCOVER_SITEMAPS_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ target: query }),
-    });
-
-    if (!response.ok) {
-      const message = await response
-        .json()
-        .then((data) => (data && data.message) || null)
-        .catch(() => null);
-      throw new Error(
-        message || `${response.status} ${response.statusText || "Beklenmedik hata"}`
-      );
+    const fastPayload = await requestDiscoveryResults(query, { mode: "fast" });
+    if (requestId !== discoveryRequestId) {
+      return;
     }
-
-    const payload = await response.json().catch(() => ({}));
-    const sanitized = sanitizeDiscoveryResults(payload.results || []);
+    const sanitized = sanitizeDiscoveryResults(fastPayload.results || []);
     state.discovery.results = sanitized;
     state.discovery.error = null;
-    state.discovery.domain = payload.query || query;
-    state.discovery.lastQuery = payload.query || query;
+    state.discovery.domain = fastPayload.query || query;
+    state.discovery.lastQuery = fastPayload.query || query;
+    state.discovery.isLoading = false;
+    state.discovery.isVerifying = true;
+    renderDiscoveryResults();
+
+    void requestDiscoveryResults(query, { mode: "verify" })
+      .then((verifyPayload) => {
+        if (requestId !== discoveryRequestId) {
+          return;
+        }
+        const verified = sanitizeDiscoveryResults(verifyPayload.results || []);
+        state.discovery.results = verified;
+        state.discovery.error = null;
+        state.discovery.domain = verifyPayload.query || query;
+        state.discovery.lastQuery = verifyPayload.query || query;
+        state.discovery.isVerifying = false;
+        renderDiscoveryResults();
+      })
+      .catch(() => {
+        if (requestId !== discoveryRequestId) {
+          return;
+        }
+        state.discovery.isVerifying = false;
+        renderDiscoveryResults();
+      });
   } catch (error) {
+    if (requestId !== discoveryRequestId) {
+      return;
+    }
     state.discovery.results = [];
     state.discovery.error = error.message || "Bilinmeyen hata";
-  } finally {
     state.discovery.isLoading = false;
+    state.discovery.isVerifying = false;
     renderDiscoveryResults();
   }
+}
+
+function buildDiscoverEndpoint(mode) {
+  if (!mode) {
+    return API_DISCOVER_SITEMAPS_ENDPOINT;
+  }
+  return `${API_DISCOVER_SITEMAPS_ENDPOINT}?mode=${encodeURIComponent(mode)}`;
+}
+
+async function requestDiscoveryResults(query, { mode = "" } = {}) {
+  const response = await fetch(buildDiscoverEndpoint(mode), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ target: query }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = payload && payload.message ? payload.message : null;
+    throw new Error(message || `${response.status} ${response.statusText || "Beklenmedik hata"}`);
+  }
+  return payload && typeof payload === "object" ? payload : {};
 }
 
 function handleDiscoverListClick(event) {
@@ -12008,7 +12079,9 @@ function handleDiscoverAddSelected() {
 }
 
 function resetDiscoverySection({ clearInput = true } = {}) {
+  discoveryRequestId += 1;
   state.discovery.isLoading = false;
+  state.discovery.isVerifying = false;
   state.discovery.results = [];
   state.discovery.error = null;
   state.discovery.lastQuery = "";
