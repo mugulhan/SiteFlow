@@ -530,11 +530,24 @@ const rawCronSchedule =
 const CRON_SCHEDULE =
   rawCronSchedule && rawCronSchedule.toLowerCase() !== "off" ? rawCronSchedule : "";
 const FETCH_CONCURRENCY_LIMIT = Number(process.env.FETCH_CONCURRENCY_LIMIT || 3);
+const parsedLinkMapFetchConcurrency = Number(process.env.LINK_MAP_FETCH_CONCURRENCY || 8);
+const LINK_MAP_FETCH_CONCURRENCY =
+  Number.isFinite(parsedLinkMapFetchConcurrency) && parsedLinkMapFetchConcurrency > 0
+    ? Math.floor(parsedLinkMapFetchConcurrency)
+    : 8;
 let activeFetchCount = 0;
+let linkMapActiveFetchCount = 0;
 const fetchQueue = [];
+const linkMapFetchQueue = [];
 const linkMapJobs = new Map();
 const domainLastRequest = new Map();
 const DOMAIN_DELAY_MS = Number(process.env.DOMAIN_DELAY_MS || 1500);
+const parsedLinkMapDomainDelayMs = Number(process.env.LINK_MAP_DOMAIN_DELAY_MS || 500);
+const LINK_MAP_DOMAIN_DELAY_MS =
+  Number.isFinite(parsedLinkMapDomainDelayMs) && parsedLinkMapDomainDelayMs >= 0
+    ? Math.floor(parsedLinkMapDomainDelayMs)
+    : 500;
+const linkMapDomainLastRequest = new Map();
 const inflightCacheRefresh = new Map();
 const parsedDiscoveryRateWindow = Number(process.env.DISCOVERY_RATE_LIMIT_WINDOW_MS);
 const parsedDiscoveryRateMax = Number(process.env.DISCOVERY_RATE_LIMIT_MAX);
@@ -579,6 +592,18 @@ async function waitForDomainSlot(hostname) {
     await new Promise((resolve) => setTimeout(resolve, DOMAIN_DELAY_MS - elapsed));
   }
   domainLastRequest.set(hostname, Date.now());
+}
+
+async function waitForLinkMapDomainSlot(hostname) {
+  if (!hostname) {
+    return;
+  }
+  const lastTime = linkMapDomainLastRequest.get(hostname) || 0;
+  const elapsed = Date.now() - lastTime;
+  if (elapsed < LINK_MAP_DOMAIN_DELAY_MS) {
+    await new Promise((resolve) => setTimeout(resolve, LINK_MAP_DOMAIN_DELAY_MS - elapsed));
+  }
+  linkMapDomainLastRequest.set(hostname, Date.now());
 }
 
 const DISCOVERY_COMMON_PATHS = [
@@ -670,6 +695,22 @@ async function withFetchSlot(task) {
   } finally {
     activeFetchCount -= 1;
     const next = fetchQueue.shift();
+    if (next) {
+      next();
+    }
+  }
+}
+
+async function withLinkMapFetchSlot(task) {
+  if (linkMapActiveFetchCount >= LINK_MAP_FETCH_CONCURRENCY) {
+    await new Promise((resolve) => linkMapFetchQueue.push(resolve));
+  }
+  linkMapActiveFetchCount += 1;
+  try {
+    return await task();
+  } finally {
+    linkMapActiveFetchCount -= 1;
+    const next = linkMapFetchQueue.shift();
     if (next) {
       next();
     }
@@ -1338,6 +1379,8 @@ async function fetchPageHtmlWithRetry(targetUrl, options = {}) {
   const extraHeaders =
     options && options.headers && typeof options.headers === "object" ? options.headers : {};
   const allowNotModified = Boolean(options && options.allowNotModified);
+  const waitForSlot =
+    options && typeof options.waitForSlot === "function" ? options.waitForSlot : waitForDomainSlot;
 
   if (isPuppeteerFirstHost(target.hostname)) {
     try {
@@ -1455,7 +1498,7 @@ async function fetchPageHtmlWithRetry(targetUrl, options = {}) {
           ? { ...baseOpts, dispatcher: INSECURE_AGENT }
           : baseOpts;
 
-        await waitForDomainSlot(target.hostname);
+        await waitForSlot(target.hostname);
         response = await fetch(target.href, options);
         responseContentType = response.headers.get("content-type") || responseContentType;
 
@@ -3934,12 +3977,14 @@ async function buildInternalLinkMapForSitemap(
     }
     const results = await Promise.all(
       batch.map((pageUrl) =>
-        withFetchSlot(async () => {
+        withLinkMapFetchSlot(async () => {
           if (shouldStopCallback && shouldStopCallback()) {
             throw createLinkMapCancelledError();
           }
           try {
-            const page = await fetchPageHtmlWithRetry(pageUrl);
+            const page = await fetchPageHtmlWithRetry(pageUrl, {
+              waitForSlot: waitForLinkMapDomainSlot,
+            });
             const statusCode = toLinkMapStatusCode(page?.statusCode) ?? 200;
             if (statusCode >= 400) {
               return {
@@ -4061,13 +4106,14 @@ async function buildInternalLinkMapForSitemap(
       }
       const probeResults = await Promise.all(
         probeBatch.map((targetUrl) =>
-          withFetchSlot(async () => {
+          withLinkMapFetchSlot(async () => {
             if (shouldStopCallback && shouldStopCallback()) {
               throw createLinkMapCancelledError();
             }
             const probe = await probeUrlStatus(targetUrl, {
               timeoutMs: LINK_MAP_TARGET_PROBE_TIMEOUT_MS,
               maxRedirects: 5,
+              waitForSlot: waitForLinkMapDomainSlot,
             });
             return { targetUrl, probe };
           })
@@ -5009,7 +5055,10 @@ async function checkHeadingLinkStatus(url, { timeoutMs = HEADING_LINK_STATUS_TIM
   }
 }
 
-async function probeUrlStatus(url, { timeoutMs = 10000, maxRedirects = 5 } = {}) {
+async function probeUrlStatus(
+  url,
+  { timeoutMs = 10000, maxRedirects = 5, waitForSlot = waitForDomainSlot } = {}
+) {
   let currentUrl = url;
   const visited = new Set();
   let redirectCount = 0;
@@ -5019,7 +5068,7 @@ async function probeUrlStatus(url, { timeoutMs = 10000, maxRedirects = 5 } = {})
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      await waitForDomainSlot(new URL(currentUrl).hostname);
+      await waitForSlot(new URL(currentUrl).hostname);
       response = await fetch(currentUrl, {
         method: "GET",
         redirect: "manual",
