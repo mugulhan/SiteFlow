@@ -633,7 +633,12 @@ const DISCOVERY_COMMON_PATHS = [
 const DISCOVERY_MAX_RESULTS = 50;
 const DISCOVERY_HTML_MAX_BYTES = 512 * 1024; // 512 KB
 const DISCOVERY_FETCH_TIMEOUT_MS = 15000;
-const DISCOVERY_VERIFY_TIMEOUT_MS = 8000;
+const DISCOVERY_VERIFY_TIMEOUT_MS = 15000;
+const DISCOVERY_VERIFY_RETRY_DELAY_MS = 2000;
+const DISCOVERY_VERIFY_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (compatible; SiteFlow/1.0)",
+  Accept: "application/xml,text/xml,application/rss+xml,*/*",
+};
 const parsedDiscoverVerifyConcurrency = Number(process.env.DISCOVER_VERIFY_CONCURRENCY);
 const DISCOVER_VERIFY_CONCURRENCY =
   Number.isFinite(parsedDiscoverVerifyConcurrency) && parsedDiscoverVerifyConcurrency > 0
@@ -4362,14 +4367,10 @@ async function verifyCandidateUrl(url, { timeout = DISCOVERY_VERIFY_TIMEOUT_MS }
     };
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const headResponse = await fetch(url, {
+    const headResponse = await fetchForVerification(url, {
       method: "HEAD",
-      redirect: "follow",
-      dispatcher: INSECURE_AGENT,
-      signal: controller.signal,
+      timeout,
     });
     if (headResponse.ok) {
       return {
@@ -4384,20 +4385,14 @@ async function verifyCandidateUrl(url, { timeout = DISCOVERY_VERIFY_TIMEOUT_MS }
     });
   } catch (_error) {
     return await verifyWithGet(url, timeout);
-  } finally {
-    clearTimeout(timer);
   }
 }
 
 async function verifyWithGet(url, timeout, fallbackMeta = null) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(url, {
+    const response = await fetchForVerification(url, {
       method: "GET",
-      redirect: "follow",
-      dispatcher: INSECURE_AGENT,
-      signal: controller.signal,
+      timeout,
     });
     const verification = {
       ok: response.ok,
@@ -4413,9 +4408,36 @@ async function verifyWithGet(url, timeout, fallbackMeta = null) {
         contentType: "",
       }
     );
-  } finally {
-    clearTimeout(timer);
   }
+}
+
+function shouldRetryVerificationStatus(statusCode) {
+  return statusCode === 429 || statusCode === 503;
+}
+
+async function fetchForVerification(url, { method = "GET", timeout = DISCOVERY_VERIFY_TIMEOUT_MS } = {}) {
+  let response;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      response = await fetch(url, {
+        method,
+        redirect: "follow",
+        dispatcher: INSECURE_AGENT,
+        signal: controller.signal,
+        headers: DISCOVERY_VERIFY_HEADERS,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (attempt === 0 && shouldRetryVerificationStatus(response.status)) {
+      await new Promise((resolve) => setTimeout(resolve, DISCOVERY_VERIFY_RETRY_DELAY_MS));
+      continue;
+    }
+    return response;
+  }
+  return response;
 }
 
 async function annotateSingleCandidateStatus(candidate) {
