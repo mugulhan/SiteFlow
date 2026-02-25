@@ -63,6 +63,7 @@ const I18N_STRINGS = {
     "controls.exportCsv": "Export CSV",
     "controls.exportJson": "Export JSON",
     "controls.alertsOnly": "Show alerts only",
+    "controls.persistentFailuresOnly": "Show persistent failures only",
     "controls.export.noData": "Nothing to export yet.",
     "controls.export.success": "Export started.",
     "controls.export.error": "Export failed, please try again.",
@@ -444,6 +445,7 @@ const I18N_STRINGS = {
     "controls.exportCsv": "CSV disari aktar",
     "controls.exportJson": "JSON disari aktar",
     "controls.alertsOnly": "Sadece uyari goster",
+    "controls.persistentFailuresOnly": "Sadece kalici hatalari goster",
     "controls.export.noData": "Aktarilacak veri yok.",
     "controls.export.success": "Disari aktarma basladi.",
     "controls.export.error": "Disari aktarma basarisiz.",
@@ -890,6 +892,7 @@ const DEFAULT_SITEMAPS = [
 const SIDEBAR_STATE_KEY = "sitemapflow:sidebar";
 const NOTIFICATION_PREF_KEY = "sitemapflow:notifications-enabled";
 const ALERTS_ONLY_KEY = "sitemapflow:alerts-only";
+const PERSISTENT_FAILURES_ONLY_KEY = "sitemapflow:persistent-failures-only";
 const TABLE_PER_PAGE_KEY = "sitemapflow:table-per-page";
 const NOTIFICATION_CHECK_INTERVAL = 5 * 60 * 1000;
 const SITEMAP_AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -928,6 +931,14 @@ const readAlertsOnlyPreference = () => {
   }
 };
 
+const readPersistentFailuresOnlyPreference = () => {
+  try {
+    return localStorage.getItem(PERSISTENT_FAILURES_ONLY_KEY) === "1";
+  } catch (error) {
+    return false;
+  }
+};
+
 const readTablePerPagePreference = () => {
   try {
     const raw = localStorage.getItem(TABLE_PER_PAGE_KEY);
@@ -956,6 +967,18 @@ const writeAlertsOnlyPreference = (value) => {
       localStorage.setItem(ALERTS_ONLY_KEY, "1");
     } else {
       localStorage.removeItem(ALERTS_ONLY_KEY);
+    }
+  } catch (error) {
+    // Depolama kullanilamiyorsa sessizce devam et.
+  }
+};
+
+const writePersistentFailuresOnlyPreference = (value) => {
+  try {
+    if (value) {
+      localStorage.setItem(PERSISTENT_FAILURES_ONLY_KEY, "1");
+    } else {
+      localStorage.removeItem(PERSISTENT_FAILURES_ONLY_KEY);
     }
   } catch (error) {
     // Depolama kullanilamiyorsa sessizce devam et.
@@ -1186,6 +1209,16 @@ function matchesNonDomainFilters(row) {
         Array.isArray(row.emailRecipients) &&
         row.emailRecipients.length > 0);
     if (!hasAlerts) {
+      return false;
+    }
+  }
+
+  if (state.persistentFailuresOnly) {
+    const isPersistentFailing =
+      Boolean(row.error) &&
+      Boolean(row.failureStatus) &&
+      Boolean(row.failureStatus.isConsistentlyFailing);
+    if (!isPersistentFailing) {
       return false;
     }
   }
@@ -1474,6 +1507,7 @@ const state = {
   rows: [],
   filter: "",
   alertsOnly: readAlertsOnlyPreference(),
+  persistentFailuresOnly: readPersistentFailuresOnlyPreference(),
   selectedDomain: null,
   selectedTag: null,
   selected: null,
@@ -3446,6 +3480,7 @@ const sidebarWatchList = document.querySelector("#sidebarWatchList");
 const exportSitemapsCsv = document.querySelector("#exportSitemapsCsv");
 const exportSitemapsJson = document.querySelector("#exportSitemapsJson");
 const alertsOnlyToggle = document.querySelector("#alertsOnlyToggle");
+const persistentFailuresOnlyToggle = document.querySelector("#persistentFailuresOnlyToggle");
 const dashboardNavButton = document.querySelector("#dashboardNav");
 const settingsNavButton = ensureSettingsNavButton();
 const pageHeaderTitle = document.querySelector(".page__header h1");
@@ -3697,6 +3732,18 @@ if (alertsOnlyToggle) {
     state.alertsOnly = Boolean(event.target.checked);
     state.tablePage = 1;
     writeAlertsOnlyPreference(state.alertsOnly);
+    renderDomainMenu();
+    renderTagMenu();
+    renderTable();
+  });
+}
+
+if (persistentFailuresOnlyToggle) {
+  persistentFailuresOnlyToggle.checked = Boolean(state.persistentFailuresOnly);
+  persistentFailuresOnlyToggle.addEventListener("change", (event) => {
+    state.persistentFailuresOnly = Boolean(event.target.checked);
+    state.tablePage = 1;
+    writePersistentFailuresOnlyPreference(state.persistentFailuresOnly);
     renderDomainMenu();
     renderTagMenu();
     renderTable();
