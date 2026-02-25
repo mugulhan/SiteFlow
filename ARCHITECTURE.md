@@ -31,6 +31,8 @@ SitemapFlow is a web UI + API that stores a list of sitemap sources, fetches XML
 - Heading analysis includes links inside headings (hash-only anchors are excluded).
 - Compare flow: select two URLs from the details list, show a persistent compare bar, then open a modal with side-by-side metrics and heading lists.
 - Domain-wide view: selecting a domain aggregates URLs across all sitemaps under that domain and renders them in the standard details table.
+- Discovery uses a two-phase flow: fast preview first, then automatic background verification; fast rows are shown as pending until verify completes.
+- Discovery responses are guarded by a request-id check in UI state, so stale async responses do not overwrite newer scan results.
 
 ## Data Flow
 ### 1) Load sitemaps
@@ -58,8 +60,11 @@ Consistent-failure handling:
 
 ### 3) Discover sitemaps
 1. UI posts a domain or URL to `POST /api/sitemaps/discover?mode=fast`.
-2. Server checks robots.txt, homepage DOM, and common sitemap paths.
-3. UI then triggers `mode=verify` to validate candidates and expand sitemap index children.
+2. Server checks robots.txt, homepage DOM, and common sitemap paths, then returns candidates quickly without verify/expand.
+3. Fast results include `verification` with pending state (`ok: null`, `pending: true`) so UI can label rows as "Verifying...".
+4. UI automatically starts a background call to `POST /api/sitemaps/discover?mode=verify`.
+5. Verify mode validates candidates and expands sitemap index children; UI replaces pending rows with final verified/failed states.
+6. UI ignores out-of-date discover responses using a request-id guard.
 
 ### 4) Persistence
 - Updates to the list are sent via `PUT /api/sitemaps` and stored in `data/sitemaps.json`.
@@ -78,7 +83,12 @@ Consistent-failure handling:
 - robots.txt parsing: `Sitemap:` lines are extracted and normalized.
 - DOM parsing: `<link rel="sitemap">` and anchor links with sitemap-like URLs are collected.
 - Common path guesses: standard sitemap paths are tried under the detected origin and subpaths.
+- Modes:
+  - `fast`: robots + DOM + common-path guesses only; crawl, verify, and child expansion are skipped.
+  - `verify` (or default): full pipeline including optional crawl discovery, candidate verification, and child sitemap expansion.
 - Verification:
+  - Candidate URLs are validated as public (`assertPublicUrl`) before outbound fetch/verify steps.
+  - Candidate verification runs in bounded parallel chunks (`DISCOVER_VERIFY_CONCURRENCY`, default 6).
   - HEAD, then GET if needed.
   - XML is analyzed to detect sitemapindex/urlset or RSS/Atom.
 - Expansion:
@@ -133,4 +143,5 @@ Consistent-failure handling:
 - Health history: `HEALTH_HISTORY_RETENTION_DAYS`
 - Alerting: `ALERT_SCORE_THRESHOLD`
 - Fetch control: `FETCH_CONCURRENCY_LIMIT`, `DOMAIN_DELAY_MS`, `PUPPETEER_FIRST_HOSTS`
+- Discovery verify concurrency: `DISCOVER_VERIFY_CONCURRENCY`
 - Startup validation: required envs are validated on boot (fail-fast).

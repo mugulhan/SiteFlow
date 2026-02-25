@@ -609,6 +609,11 @@ const DISCOVERY_MAX_RESULTS = 50;
 const DISCOVERY_HTML_MAX_BYTES = 512 * 1024; // 512 KB
 const DISCOVERY_FETCH_TIMEOUT_MS = 15000;
 const DISCOVERY_VERIFY_TIMEOUT_MS = 8000;
+const parsedDiscoverVerifyConcurrency = Number(process.env.DISCOVER_VERIFY_CONCURRENCY);
+const DISCOVER_VERIFY_CONCURRENCY =
+  Number.isFinite(parsedDiscoverVerifyConcurrency) && parsedDiscoverVerifyConcurrency > 0
+    ? Math.floor(parsedDiscoverVerifyConcurrency)
+    : 6;
 const DISCOVERY_CHILD_MAX_PER_PARENT = 20;
 const DISCOVERY_CHILD_MAX_BYTES = 1024 * 1024;
 const DISCOVERY_CRAWL_MAX_PAGES = 10;
@@ -4367,86 +4372,99 @@ async function verifyWithGet(url, timeout, fallbackMeta = null) {
   }
 }
 
-async function annotateCandidateStatuses(candidates) {
-  const annotated = [];
-  for (const candidate of candidates) {
-    const verification = await verifyCandidateUrl(candidate.url);
-    let xmlText = null;
-    let entryCount = null;
-    const expectsXml = candidate.type === "sitemap" || candidate.type === "rss";
-    if (verification.ok && expectsXml) {
-      if (candidate.type === "sitemap") {
-        try {
-          const analysis = await analyzeSitemapCandidateStream(candidate.url, {
-            maxChildSitemaps: 0,
-          });
-          if (analysis.isHtml) {
-            verification.ok = false;
-            verification.reason = "html";
-            verification.detail = null;
-          } else if (!analysis.kind) {
-            verification.ok = false;
-            verification.reason = "invalid-xml";
-            verification.detail = analysis.errorDetail || null;
-          } else {
-            entryCount = analysis.entryCount;
-          }
-        } catch (_error) {
-          verification.ok = false;
-          verification.reason = "invalid-xml";
-          verification.detail = null;
-        }
-      } else if (candidate.type === "rss") {
-        try {
-          const analysis = await analyzeFeedCandidateStream(candidate.url);
-          if (analysis.isHtml) {
-            verification.ok = false;
-            verification.reason = "html";
-            verification.detail = null;
-          } else if (!analysis.kind) {
-            verification.ok = false;
-            verification.reason = "invalid-xml";
-            verification.detail = analysis.errorDetail || null;
-          } else {
-            entryCount = analysis.entryCount;
-          }
-        } catch (_error) {
-          verification.ok = false;
-          verification.reason = "invalid-xml";
-          verification.detail = null;
-        }
-      } else {
-        const { text, analysis } = await fetchCandidateXml(candidate.url, {
-          sizeLimit: DISCOVERY_CHILD_MAX_BYTES,
-          allowBrowserFallback: true,
+async function annotateSingleCandidateStatus(candidate) {
+  const nextCandidate = { ...candidate };
+  const verification = await verifyCandidateUrl(nextCandidate.url);
+  let xmlText = null;
+  let entryCount = null;
+  const expectsXml = nextCandidate.type === "sitemap" || nextCandidate.type === "rss";
+  if (verification.ok && expectsXml) {
+    if (nextCandidate.type === "sitemap") {
+      try {
+        const analysis = await analyzeSitemapCandidateStream(nextCandidate.url, {
+          maxChildSitemaps: 0,
         });
-        xmlText = text;
-        if (!xmlText) {
-          verification.ok = false;
-          verification.reason = "invalid-xml";
-          verification.detail = null;
-        } else if (analysis.isHtml) {
+        if (analysis.isHtml) {
           verification.ok = false;
           verification.reason = "html";
           verification.detail = null;
         } else if (!analysis.kind) {
           verification.ok = false;
           verification.reason = "invalid-xml";
-          verification.detail = null;
+          verification.detail = analysis.errorDetail || null;
         } else {
-          if (candidate.type !== analysis.kind) {
-            candidate.type = analysis.kind;
-          }
           entryCount = analysis.entryCount;
         }
+      } catch (_error) {
+        verification.ok = false;
+        verification.reason = "invalid-xml";
+        verification.detail = null;
+      }
+    } else if (nextCandidate.type === "rss") {
+      try {
+        const analysis = await analyzeFeedCandidateStream(nextCandidate.url);
+        if (analysis.isHtml) {
+          verification.ok = false;
+          verification.reason = "html";
+          verification.detail = null;
+        } else if (!analysis.kind) {
+          verification.ok = false;
+          verification.reason = "invalid-xml";
+          verification.detail = analysis.errorDetail || null;
+        } else {
+          entryCount = analysis.entryCount;
+        }
+      } catch (_error) {
+        verification.ok = false;
+        verification.reason = "invalid-xml";
+        verification.detail = null;
+      }
+    } else {
+      const { text, analysis } = await fetchCandidateXml(nextCandidate.url, {
+        sizeLimit: DISCOVERY_CHILD_MAX_BYTES,
+        allowBrowserFallback: true,
+      });
+      xmlText = text;
+      if (!xmlText) {
+        verification.ok = false;
+        verification.reason = "invalid-xml";
+        verification.detail = null;
+      } else if (analysis.isHtml) {
+        verification.ok = false;
+        verification.reason = "html";
+        verification.detail = null;
+      } else if (!analysis.kind) {
+        verification.ok = false;
+        verification.reason = "invalid-xml";
+        verification.detail = null;
+      } else {
+        if (nextCandidate.type !== analysis.kind) {
+          nextCandidate.type = analysis.kind;
+        }
+        entryCount = analysis.entryCount;
       }
     }
-    annotated.push({
-      ...candidate,
-      verification,
-      xmlText,
-      entryCount,
-    });
+  }
+  return {
+    ...nextCandidate,
+    verification,
+    xmlText,
+    entryCount,
+  };
+}
+
+async function annotateCandidateStatuses(candidates) {
+  if (!Array.isArray(candidates) || !candidates.length) {
+    return [];
+  }
+  const chunkSize = Math.max(1, DISCOVER_VERIFY_CONCURRENCY);
+  const annotated = [];
+  for (let i = 0; i < candidates.length; i += chunkSize) {
+    const chunk = candidates.slice(i, i + chunkSize);
+    const chunkResults = await Promise.all(
+      chunk.map((candidate) => annotateSingleCandidateStatus(candidate))
+    );
+    annotated.push(...chunkResults);
   }
   return annotated;
 }

@@ -105,6 +105,7 @@ const I18N_STRINGS = {
     "finder.status.verifying": "{count} candidates found for {domain}. Verifying...",
     "finder.status.empty": "No sitemap-like URLs were detected for {domain}.",
     "finder.status.error": "Discovery failed: {error}",
+    "finder.error.timeout": "Discovery request timed out. Please try again.",
     "finder.empty": "No discovery results yet.",
     "finder.results.source.dom": "HTML",
     "finder.results.source.robots": "Robots.txt",
@@ -489,6 +490,7 @@ const I18N_STRINGS = {
     "finder.status.verifying": "{domain} icin {count} aday bulundu, dogrulaniyor...",
     "finder.status.empty": "{domain} icin sitemap benzeri URL bulunamadi.",
     "finder.status.error": "Kesif basarisiz: {error}",
+    "finder.error.timeout": "Kesif istegi zaman asimina ugradi. Lutfen tekrar deneyin.",
     "finder.empty": "Henuz sonuc yok.",
     "finder.results.source.dom": "HTML",
     "finder.results.source.robots": "Robots.txt",
@@ -11980,19 +11982,31 @@ function buildDiscoverEndpoint(mode) {
 }
 
 async function requestDiscoveryResults(query, { mode = "" } = {}) {
-  const response = await fetch(buildDiscoverEndpoint(mode), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ target: query }),
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message = payload && payload.message ? payload.message : null;
-    throw new Error(message || `${response.status} ${response.statusText || "Beklenmedik hata"}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CLIENT_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(buildDiscoverEndpoint(mode), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ target: query }),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message = payload && payload.message ? payload.message : null;
+      throw new Error(message || `${response.status} ${response.statusText || "Beklenmedik hata"}`);
+    }
+    return payload && typeof payload === "object" ? payload : {};
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      throw new Error(t("finder.error.timeout"));
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return payload && typeof payload === "object" ? payload : {};
 }
 
 function handleDiscoverListClick(event) {
