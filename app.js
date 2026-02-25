@@ -119,6 +119,7 @@ const I18N_STRINGS = {
     "finder.results.reason.html": "HTML page",
     "finder.results.reason.invalidXml": "Invalid XML",
     "finder.results.reason.verifyFailed": "Verification failed",
+    "finder.results.reason.verifyTimeout": "Verification timeout",
     "finder.parentLabel": "Found in {parent}",
     "finder.countLabel": "{count} URLs",
     "finder.addSingle": "Add",
@@ -505,6 +506,7 @@ const I18N_STRINGS = {
     "finder.results.reason.html": "HTML sayfa",
     "finder.results.reason.invalidXml": "Gecerli XML degil",
     "finder.results.reason.verifyFailed": "Dogrulama basarisiz",
+    "finder.results.reason.verifyTimeout": "Dogrulama zaman asimi",
     "finder.parentLabel": "{parent} icinde bulundu",
     "finder.countLabel": "{count} URL",
     "finder.addSingle": "Ekle",
@@ -11767,6 +11769,8 @@ function getDiscoveryReasonLabel(reason) {
       return t("finder.results.reason.invalidXml");
     case "verify-failed":
       return t("finder.results.reason.verifyFailed");
+    case "verify-timeout":
+      return t("finder.results.reason.verifyTimeout");
     default:
       return null;
   }
@@ -11974,6 +11978,35 @@ async function handleDiscoverSubmit(event) {
     state.discovery.isVerifying = true;
     renderDiscoveryResults();
 
+    const applyExpandPayload = (payload) => {
+      const expanded = sanitizeDiscoveryResults(payload.results || []);
+      if (!expanded.length) {
+        return;
+      }
+      state.discovery.results = expanded;
+      state.discovery.error = null;
+      state.discovery.domain = payload.query || query;
+      state.discovery.lastQuery = payload.query || query;
+      renderDiscoveryResults();
+    };
+
+    const startExpandPhase = (verifiedResults) => {
+      const candidates = Array.isArray(verifiedResults) ? verifiedResults : [];
+      if (!candidates.length) {
+        return;
+      }
+      void requestDiscoveryResults(query, { mode: "expand", candidates })
+        .then((expandPayload) => {
+          if (requestId !== discoveryRequestId) {
+            return;
+          }
+          applyExpandPayload(expandPayload || {});
+        })
+        .catch(() => {
+          // Expand hatasi verify sonucunu gecersiz kilmaz; mevcut listeyi koru.
+        });
+    };
+
     const applyVerifyPayload = (payload) => {
       const verified = sanitizeDiscoveryResults(payload.results || []);
       state.discovery.results = verified;
@@ -11982,6 +12015,7 @@ async function handleDiscoverSubmit(event) {
       state.discovery.lastQuery = payload.query || query;
       state.discovery.isVerifying = false;
       renderDiscoveryResults();
+      startExpandPhase(verified);
     };
 
     void requestDiscoveryResults(query, { mode: "verify" })
@@ -12030,16 +12064,20 @@ function buildDiscoverEndpoint(mode) {
   return `${API_DISCOVER_SITEMAPS_ENDPOINT}?mode=${encodeURIComponent(mode)}`;
 }
 
-async function requestDiscoveryResults(query, { mode = "" } = {}) {
+async function requestDiscoveryResults(query, { mode = "", candidates = [] } = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), CLIENT_FETCH_TIMEOUT_MS);
   try {
+    const requestBody = { target: query };
+    if (Array.isArray(candidates) && candidates.length) {
+      requestBody.candidates = candidates;
+    }
     const response = await fetch(buildDiscoverEndpoint(mode), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ target: query }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
     const payload = await response.json().catch(() => null);

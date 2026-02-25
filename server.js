@@ -633,7 +633,11 @@ const DISCOVERY_COMMON_PATHS = [
 const DISCOVERY_MAX_RESULTS = 50;
 const DISCOVERY_HTML_MAX_BYTES = 512 * 1024; // 512 KB
 const DISCOVERY_FETCH_TIMEOUT_MS = 15000;
-const DISCOVERY_VERIFY_TIMEOUT_MS = 15000;
+const parsedDiscoveryVerifyTimeoutMs = Number(process.env.DISCOVERY_VERIFY_TIMEOUT_MS);
+const DISCOVERY_VERIFY_TIMEOUT_MS =
+  Number.isFinite(parsedDiscoveryVerifyTimeoutMs) && parsedDiscoveryVerifyTimeoutMs > 0
+    ? Math.floor(parsedDiscoveryVerifyTimeoutMs)
+    : 8000;
 const DISCOVERY_VERIFY_RETRY_DELAY_MS = 2000;
 const DISCOVERY_VERIFY_HEADERS = {
   "User-Agent": "Mozilla/5.0 (compatible; SiteFlow/1.0)",
@@ -4383,9 +4387,28 @@ async function verifyCandidateUrl(url, { timeout = DISCOVERY_VERIFY_TIMEOUT_MS }
       fallbackStatus: headResponse.status,
       fallbackContentType: headResponse.headers.get("content-type") || "",
     });
-  } catch (_error) {
+  } catch (error) {
+    if (isVerificationTimeoutError(error)) {
+      return {
+        ok: false,
+        statusCode: null,
+        contentType: "",
+        reason: "verify-timeout",
+      };
+    }
     return await verifyWithGet(url, timeout);
   }
+}
+
+function isVerificationTimeoutError(error) {
+  if (!error) {
+    return false;
+  }
+  if (error.name === "AbortError") {
+    return true;
+  }
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return message.includes("timeout") || message.includes("aborted");
 }
 
 async function verifyWithGet(url, timeout, fallbackMeta = null) {
@@ -7147,6 +7170,7 @@ app.get("/api/sitemaps", requireAuth, async (req, res, next) => {
 app.post("/api/sitemaps/discover", requireAuth, discoveryLimiter, async (req, res, next) => {
   const mode = String((req.query && req.query.mode) || "").toLowerCase();
   const isFast = mode === "fast";
+  const isExpand = mode === "expand";
 
   try {
     const rawTarget =
@@ -7167,6 +7191,22 @@ app.post("/api/sitemaps/discover", requireAuth, discoveryLimiter, async (req, re
     const origins = buildDiscoveryOrigins(normalizedTarget);
     if (!origins.length) {
       res.status(400).json({ message: "Gecerli bir alan adi veya URL girin." });
+      return;
+    }
+
+    if (isExpand) {
+      const providedCandidates = Array.isArray(req.body?.candidates) ? req.body.candidates : [];
+      const normalizedCandidates = dedupeDiscoveryResults([providedCandidates]);
+      const expandedResults = await expandSitemapChildren(normalizedCandidates);
+      const publicResults = expandedResults.map((entry) => {
+        const { xmlText, ...rest } = entry || {};
+        return rest;
+      });
+      res.json({
+        query: normalizedTarget.hostname,
+        baseUrl: origins[0] || "",
+        results: publicResults,
+      });
       return;
     }
 
@@ -7217,12 +7257,7 @@ app.post("/api/sitemaps/discover", requireAuth, discoveryLimiter, async (req, re
         },
       }));
     } else {
-      const verifiedResults = await annotateCandidateStatuses(deduped);
-      const reachableResults = verifiedResults.filter(
-        (entry) => entry && entry.verification && entry.verification.ok
-      );
-      const expandedResults = await expandSitemapChildren(reachableResults);
-      finalResults = dedupeDiscoveryResults([verifiedResults, expandedResults]);
+      finalResults = await annotateCandidateStatuses(deduped);
     }
     const publicResults = finalResults.map((entry) => {
       const { xmlText, ...rest } = entry || {};
