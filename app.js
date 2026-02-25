@@ -118,6 +118,7 @@ const I18N_STRINGS = {
     "finder.results.status.code": "HTTP {status}",
     "finder.results.reason.html": "HTML page",
     "finder.results.reason.invalidXml": "Invalid XML",
+    "finder.results.reason.verifyFailed": "Verification failed",
     "finder.parentLabel": "Found in {parent}",
     "finder.countLabel": "{count} URLs",
     "finder.addSingle": "Add",
@@ -503,6 +504,7 @@ const I18N_STRINGS = {
     "finder.results.status.code": "HTTP {status}",
     "finder.results.reason.html": "HTML sayfa",
     "finder.results.reason.invalidXml": "Gecerli XML degil",
+    "finder.results.reason.verifyFailed": "Dogrulama basarisiz",
     "finder.parentLabel": "{parent} icinde bulundu",
     "finder.countLabel": "{count} URL",
     "finder.addSingle": "Ekle",
@@ -11632,6 +11634,34 @@ function sanitizeDiscoveryResults(results) {
   return sanitized;
 }
 
+function finalizePendingDiscoveryResults(reason = "verify-failed") {
+  if (!Array.isArray(state.discovery.results) || !state.discovery.results.length) {
+    return;
+  }
+  state.discovery.results = state.discovery.results.map((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return entry;
+    }
+    const verification = entry.verification || {};
+    const isPending = Boolean(verification.pending) || verification.ok === null;
+    if (!isPending) {
+      return entry;
+    }
+    return {
+      ...entry,
+      verification: {
+        ...verification,
+        ok: false,
+        pending: false,
+        reason:
+          typeof verification.reason === "string" && verification.reason.trim()
+            ? verification.reason.trim()
+            : reason,
+      },
+    };
+  });
+}
+
 function refreshDiscoveryExistingFlags() {
   if (!state.discovery.results.length) {
     return;
@@ -11735,6 +11765,8 @@ function getDiscoveryReasonLabel(reason) {
       return t("finder.results.reason.html");
     case "invalid-xml":
       return t("finder.results.reason.invalidXml");
+    case "verify-failed":
+      return t("finder.results.reason.verifyFailed");
     default:
       return null;
   }
@@ -11942,25 +11974,42 @@ async function handleDiscoverSubmit(event) {
     state.discovery.isVerifying = true;
     renderDiscoveryResults();
 
+    const applyVerifyPayload = (payload) => {
+      const verified = sanitizeDiscoveryResults(payload.results || []);
+      state.discovery.results = verified;
+      state.discovery.error = null;
+      state.discovery.domain = payload.query || query;
+      state.discovery.lastQuery = payload.query || query;
+      state.discovery.isVerifying = false;
+      renderDiscoveryResults();
+    };
+
     void requestDiscoveryResults(query, { mode: "verify" })
       .then((verifyPayload) => {
         if (requestId !== discoveryRequestId) {
           return;
         }
-        const verified = sanitizeDiscoveryResults(verifyPayload.results || []);
-        state.discovery.results = verified;
-        state.discovery.error = null;
-        state.discovery.domain = verifyPayload.query || query;
-        state.discovery.lastQuery = verifyPayload.query || query;
-        state.discovery.isVerifying = false;
-        renderDiscoveryResults();
+        applyVerifyPayload(verifyPayload || {});
       })
-      .catch(() => {
+      .catch(async () => {
         if (requestId !== discoveryRequestId) {
           return;
         }
-        state.discovery.isVerifying = false;
-        renderDiscoveryResults();
+        try {
+          const retryPayload = await requestDiscoveryResults(query, { mode: "verify" });
+          if (requestId !== discoveryRequestId) {
+            return;
+          }
+          applyVerifyPayload(retryPayload || {});
+        } catch (_retryError) {
+          if (requestId !== discoveryRequestId) {
+            return;
+          }
+          finalizePendingDiscoveryResults("verify-failed");
+          state.discovery.error = null;
+          state.discovery.isVerifying = false;
+          renderDiscoveryResults();
+        }
       });
   } catch (error) {
     if (requestId !== discoveryRequestId) {
