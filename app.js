@@ -32,6 +32,7 @@ const CONTENT_PARAGRAPH_MIN_LENGTH = 30;
 const COMPARE_CONTENT_DIFF_PREVIEW_LIMIT = 12;
 const COMPARE_MIN_ITEMS = 2;
 const COMPARE_MAX_ITEMS = 4;
+const DEFAULT_FAILURE_STREAK_THRESHOLD = 3;
 
 const LANGUAGE_STORAGE_KEY = "sitemapflow:language";
 const SUPPORTED_LANGUAGES = ["en", "tr"];
@@ -131,10 +132,14 @@ const I18N_STRINGS = {
     "table.empty": "No data yet.",
     "table.noResults": "No matching results found.",
     "table.errorPrefix": "Error:",
+    "table.failure.consistentBadge": "{count}x persistent",
     "status.refresh.summary": "{success} sitemaps updated, {failed} failed.",
     "status.refresh.successOnly": "{success} sitemaps updated successfully.",
     "status.refresh.successChunk": "{success} sitemaps updated,",
     "status.refresh.failChunk": "{failed} failed.",
+    "status.refresh.failSplit": "failures: {recent} new, {persistent} persistent.",
+    "status.refresh.failRecentOnly": "failures: {recent} new.",
+    "status.refresh.failPersistentOnly": "failures: {persistent} persistent.",
     "status.refresh.unreachable":
       "Sitemaps could not be loaded. Network or CORS restrictions may be blocking the requests.",
     "status.tag.added": "Tag added.",
@@ -508,10 +513,14 @@ const I18N_STRINGS = {
     "table.empty": "Hen\u00FCz veri yok.",
     "table.noResults": "\u0130lgili sonu\u00E7 bulunamad\u0131.",
     "table.errorPrefix": "Hata:",
+    "table.failure.consistentBadge": "{count}x uzun hatali",
     "status.refresh.summary": "{success} sitemap g\u00FCncellendi, {failed} sitemap hata verdi.",
     "status.refresh.successOnly": "{success} sitemap ba\u015Far\u0131yla g\u00FCncellendi.",
     "status.refresh.successChunk": "{success} sitemap g\u00FCncellendi,",
     "status.refresh.failChunk": "{failed} sitemap hata verdi.",
+    "status.refresh.failSplit": "hatalar: {recent} yeni, {persistent} uzun suredir.",
+    "status.refresh.failRecentOnly": "hatalar: {recent} yeni.",
+    "status.refresh.failPersistentOnly": "hatalar: {persistent} uzun suredir.",
     "status.refresh.unreachable":
       "Sitemap'ler y\u00FCklenemedi. CORS veya a\u011F k\u0131s\u0131tlamalar\u0131 isteklere engel olabilir.",
     "status.tag.added": "Etiket eklendi.",
@@ -883,6 +892,7 @@ const NOTIFICATION_PREF_KEY = "sitemapflow:notifications-enabled";
 const ALERTS_ONLY_KEY = "sitemapflow:alerts-only";
 const TABLE_PER_PAGE_KEY = "sitemapflow:table-per-page";
 const NOTIFICATION_CHECK_INTERVAL = 5 * 60 * 1000;
+const SITEMAP_AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const appShell = document.querySelector(".app-shell");
 const sidebarElement = document.querySelector("#sidebar");
 const sidebarToggleElements = document.querySelectorAll("[data-role='sidebar-toggle']");
@@ -1301,6 +1311,60 @@ function formatDateTime(isoString) {
   return formatRelativeTime(date);
 }
 
+function normalizeFailureStatus(raw) {
+  const fallback = {
+    consecutiveFailures: 0,
+    threshold: DEFAULT_FAILURE_STREAK_THRESHOLD,
+    isConsistentlyFailing: false,
+    backoffActive: false,
+    firstFailureAt: null,
+    lastFailureAt: null,
+    lastSuccessAt: null,
+    nextRetryAt: null,
+    lastFailureType: "",
+    lastFailureCode: "",
+    lastFailureMessage: "",
+  };
+  if (!raw || typeof raw !== "object") {
+    return fallback;
+  }
+
+  const threshold = Number.isFinite(Number(raw.threshold))
+    ? Math.max(2, Math.floor(Number(raw.threshold)))
+    : DEFAULT_FAILURE_STREAK_THRESHOLD;
+  const consecutiveFailures = Number.isFinite(Number(raw.consecutiveFailures))
+    ? Math.max(0, Math.floor(Number(raw.consecutiveFailures)))
+    : 0;
+
+  return {
+    consecutiveFailures,
+    threshold,
+    isConsistentlyFailing:
+      Boolean(raw.isConsistentlyFailing) || consecutiveFailures >= threshold,
+    backoffActive: Boolean(raw.backoffActive),
+    firstFailureAt: typeof raw.firstFailureAt === "string" ? raw.firstFailureAt : null,
+    lastFailureAt: typeof raw.lastFailureAt === "string" ? raw.lastFailureAt : null,
+    lastSuccessAt: typeof raw.lastSuccessAt === "string" ? raw.lastSuccessAt : null,
+    nextRetryAt: typeof raw.nextRetryAt === "string" ? raw.nextRetryAt : null,
+    lastFailureType: typeof raw.lastFailureType === "string" ? raw.lastFailureType : "",
+    lastFailureCode: typeof raw.lastFailureCode === "string" ? raw.lastFailureCode : "",
+    lastFailureMessage:
+      typeof raw.lastFailureMessage === "string" ? raw.lastFailureMessage : "",
+  };
+}
+
+function incrementFailureStatus(status) {
+  const current = normalizeFailureStatus(status);
+  const nextFailures = current.consecutiveFailures + 1;
+  return normalizeFailureStatus({
+    ...current,
+    consecutiveFailures: nextFailures,
+    firstFailureAt: current.firstFailureAt || new Date().toISOString(),
+    lastFailureAt: new Date().toISOString(),
+    isConsistentlyFailing: nextFailures >= current.threshold,
+  });
+}
+
 function createStateEntry(raw) {
   if (!raw || typeof raw.url !== "string") {
     return null;
@@ -1335,6 +1399,7 @@ function createStateEntry(raw) {
     notificationsEnabled,
     emailEnabled,
     emailRecipients,
+    failureStatus: normalizeFailureStatus(raw.failureStatus),
   };
 }
 
@@ -1502,6 +1567,7 @@ const detailScanBuffer = {
 };
 let detailScanRequestId = 0;
 let detailRenderScheduled = false;
+let sitemapAutoRefreshTimer = null;
 const detailMetadataRequests = new Map();
 const notificationManager = (() => {
   const storageKey = NOTIFICATION_PREF_KEY;
@@ -3585,13 +3651,33 @@ if (detailsTabs && detailsTabs.length) {
 }
 showDashboardView();
 
-refreshButton.addEventListener("click", async () => {
+async function refreshSitemaps({ background = false, resetOnFailure = false } = {}) {
   try {
-    await syncSitemapsFromServer();
-    await loadSitemaps();
+    await syncSitemapsFromServer(resetOnFailure);
+    await loadSitemaps({ background });
   } catch (error) {
+    if (background) {
+      console.warn("Arka plan sitemap yenilemesi basarisiz oldu:", error);
+      return;
+    }
     handleLoadError(error);
   }
+}
+
+function startSitemapAutoRefresh() {
+  if (sitemapAutoRefreshTimer) {
+    clearInterval(sitemapAutoRefreshTimer);
+  }
+  sitemapAutoRefreshTimer = setInterval(() => {
+    if (document.hidden) {
+      return;
+    }
+    refreshSitemaps({ background: true }).catch(() => undefined);
+  }, SITEMAP_AUTO_REFRESH_INTERVAL_MS);
+}
+
+refreshButton.addEventListener("click", async () => {
+  await refreshSitemaps({ background: false });
 });
 
 const handleSearchInput = debounce((value) => {
@@ -3761,7 +3847,9 @@ if (adderTabButtons.length) {
 
 renderDiscoveryResults();
 
-async function loadSitemaps() {
+async function loadSitemaps({ background = false } = {}) {
+  const shouldShowLoading = !background;
+
   if (!state.sitemaps.length) {
     state.rows = [];
     renderDomainMenu();
@@ -3775,18 +3863,26 @@ async function loadSitemaps() {
     return;
   }
 
-  setStatus("Sitemap verileri yÃƒÂ¼kleniyor...");
-  toggleLoading(true);
-  state.editingUrl = null;
-  resetDetails();
-  renderDomainMenu();
-  renderTagMenu();
-  showSkeletonLoader(state.sitemaps.length);
+  if (shouldShowLoading) {
+    setStatus("Sitemap verileri yukleniyor...");
+    toggleLoading(true);
+    state.editingUrl = null;
+    resetDetails();
+    renderDomainMenu();
+    renderTagMenu();
+    showSkeletonLoader(state.sitemaps.length);
+  }
 
   try {
     const rows = await Promise.all(state.sitemaps.map((config) => buildRowFromConfig(config)));
 
     state.rows = rows;
+    if (background && state.selected && !state.selected.isDomainAggregate) {
+      const selectedRow = rows.find((row) => row && row.url === state.selected.url);
+      if (selectedRow) {
+        state.selected = selectedRow;
+      }
+    }
     notificationManager.record(rows);
     if (rows.some((row) => row.notificationsEnabled || (row.emailEnabled && Array.isArray(row.emailRecipients) && row.emailRecipients.length > 0))) {
       notificationManager.ensurePolling();
@@ -3802,8 +3898,14 @@ async function loadSitemaps() {
     const failCount = rows.length - successCount;
 
     const formattedSuccess = numberFormatter.format(successCount);
-
+    const persistentFailCount = rows.filter(
+      (row) => row.error && row.failureStatus && row.failureStatus.isConsistentlyFailing
+    ).length;
+    const recentFailCount = Math.max(0, failCount - persistentFailCount);
     const formattedFail = numberFormatter.format(failCount);
+    const formattedRecentFail = numberFormatter.format(recentFailCount);
+    const formattedPersistentFail = numberFormatter.format(persistentFailCount);
+    const statusOptions = { toast: !background };
 
 
 
@@ -3814,25 +3916,60 @@ async function loadSitemaps() {
 
       const failChunk = document.createElement("span");
       failChunk.classList.add("status__chunk", "status__chunk--error");
-      failChunk.textContent = t("status.refresh.failChunk", { failed: formattedFail });
+      if (recentFailCount && persistentFailCount) {
+        failChunk.textContent = t("status.refresh.failSplit", {
+          recent: formattedRecentFail,
+          persistent: formattedPersistentFail,
+        });
+      } else if (recentFailCount) {
+        failChunk.textContent = t("status.refresh.failRecentOnly", {
+          recent: formattedRecentFail,
+        });
+      } else if (persistentFailCount) {
+        failChunk.textContent = t("status.refresh.failPersistentOnly", {
+          persistent: formattedPersistentFail,
+        });
+      } else {
+        failChunk.textContent = t("status.refresh.failChunk", { failed: formattedFail });
+      }
 
       setStatus(
         [successChunk, document.createTextNode(" "), failChunk],
         "info",
-        { toast: true }
+        statusOptions
       );
     } else if (successCount) {
 
-      setStatus(t("status.refresh.successOnly", { success: formattedSuccess }), "success");
+      setStatus(t("status.refresh.successOnly", { success: formattedSuccess }), "success", statusOptions);
 
     } else {
-
-      setStatus(t("status.refresh.unreachable"), "error");
+      if (failCount) {
+        let failOnlyText = t("status.refresh.failChunk", { failed: formattedFail });
+        if (recentFailCount && persistentFailCount) {
+          failOnlyText = t("status.refresh.failSplit", {
+            recent: formattedRecentFail,
+            persistent: formattedPersistentFail,
+          });
+        } else if (recentFailCount) {
+          failOnlyText = t("status.refresh.failRecentOnly", {
+            recent: formattedRecentFail,
+          });
+        } else if (persistentFailCount) {
+          failOnlyText = t("status.refresh.failPersistentOnly", {
+            persistent: formattedPersistentFail,
+          });
+        }
+        setStatus(failOnlyText, "error", statusOptions);
+      } else {
+        setStatus(t("status.refresh.unreachable"), "error", statusOptions);
+      }
 
     }
 
   } finally {
-    toggleLoading(false);
+    if (shouldShowLoading) {
+      toggleLoading(false);
+    }
     renderDiscoveryResults();
   }
 }
@@ -3841,6 +3978,8 @@ async function buildRowFromConfig(config) {
   const title = config.title ? config.title.trim() : config.url;
   const domain = config.domain || extractDomain(config.url);
   config.domain = domain;
+  const failureStatus = normalizeFailureStatus(config.failureStatus);
+  config.failureStatus = failureStatus;
   const tags = sanitizeTags(config.tags);
   config.tags = tags;
   const sourceType = normalizeSourceType(config.sourceType);
@@ -3860,6 +3999,7 @@ async function buildRowFromConfig(config) {
     const entries = extractEntries(doc, type, config.url);
     const recentEntries = deriveRecentEntries(entries, 8);
     const updateRate = calculateDailyUpdateRate(xmlText, 7, config.url, entries);
+    const nextFailureStatus = normalizeFailureStatus(config.failureStatus);
 
     return {
       title,
@@ -3881,9 +4021,12 @@ async function buildRowFromConfig(config) {
       notificationsEnabled,
       emailEnabled,
       emailRecipients,
+      failureStatus: nextFailureStatus,
     };
   } catch (error) {
     console.error(`"${title}" yÃƒÂ¼klenemedi:`, error);
+    const nextFailureStatus = incrementFailureStatus(failureStatus);
+    config.failureStatus = nextFailureStatus;
     return {
       title,
       url: config.url,
@@ -3904,6 +4047,7 @@ async function buildRowFromConfig(config) {
       notificationsEnabled,
       emailEnabled,
       emailRecipients,
+      failureStatus: nextFailureStatus,
     };
   }
 }
@@ -6875,6 +7019,14 @@ function renderTable() {
       errorText.textContent = errorMessage;
 
       errorBadge.append(errorIcon, errorText);
+      if (row.failureStatus && row.failureStatus.isConsistentlyFailing) {
+        const persistentBadge = document.createElement("span");
+        persistentBadge.classList.add("table__issue-badge", "table__issue-badge--warn");
+        persistentBadge.textContent = t("table.failure.consistentBadge", {
+          count: numberFormatter.format(row.failureStatus.consecutiveFailures || 0),
+        });
+        errorBadge.append(" ", persistentBadge);
+      }
       dateCell.classList.add("table__date--error");
       dateCell.appendChild(errorBadge);
     } else {
@@ -10869,6 +11021,7 @@ function addSourceEntry({
     emailEnabled: false,
     emailRecipients: [],
     sourceType: normalizedType,
+    failureStatus: normalizeFailureStatus(null),
   });
   persistSitemaps(state.sitemaps);
   renderDomainMenu();
@@ -10900,6 +11053,7 @@ function addSourceEntry({
     notificationsEnabled: false,
     emailEnabled: false,
     emailRecipients: [],
+    failureStatus: normalizeFailureStatus(null),
   };
   if (existingIndex === -1) {
     state.rows.unshift(placeholder);
@@ -11302,8 +11456,8 @@ async function bootstrap() {
 
   initializeDetailPrefixMenu();
   initializeChartFilters();
-  await syncSitemapsFromServer(true);
-  await loadSitemaps();
+  await refreshSitemaps({ background: false, resetOnFailure: true });
+  startSitemapAutoRefresh();
 }
 
 bootstrap().catch(handleLoadError);

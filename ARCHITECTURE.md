@@ -37,6 +37,7 @@ SitemapFlow is a web UI + API that stores a list of sitemap sources, fetches XML
 1. UI loads the saved list via `GET /api/sitemaps`.
 2. UI requests each sitemap XML through `GET /api/fetch-sitemap?url=...`.
 3. XML is parsed in the browser (DOMParser) and summarized for table and detail views.
+4. UI performs a background refresh cycle every 5 minutes (tab visible), so status text updates without full page reload.
 
 ### 2) Fetch sitemap XML (cache + refresh)
 1. Server checks disk cache for the sitemap URL.
@@ -47,6 +48,13 @@ SitemapFlow is a web UI + API that stores a list of sitemap sources, fetches XML
 Cache behavior is controlled by:
 - `SITEMAP_CACHE_TTL_MS` (default 15 minutes)
 - `SITEMAP_CACHE_REFRESH_INTERVAL_MS` (default 15 minutes)
+- `SITEMAP_FAILURE_STREAK_THRESHOLD` (default 3)
+- `SITEMAP_FAILURE_BACKOFF_MULTIPLIER` (default 4)
+
+Consistent-failure handling:
+- Server tracks consecutive failures and last success/failure timestamps per sitemap in cache metadata.
+- If a sitemap reaches the failure streak threshold, periodic refresh switches to backoff mode (less frequent retries).
+- Successful fetch resets failure streak state automatically.
 
 ### 3) Discover sitemaps
 1. UI posts a domain or URL to `POST /api/sitemaps/discover?mode=fast`.
@@ -93,6 +101,7 @@ Cache behavior is controlled by:
 ## Scheduling
 - On server start, all known sitemaps are refreshed once (warmup).
 - A periodic job refreshes all sitemaps based on `SITEMAP_CACHE_REFRESH_INTERVAL_MS`.
+- Sitemaps in backoff mode (consistently failing) are skipped until their next retry window.
 - A periodic job purges stale cache files based on `SITEMAP_CACHE_PURGE_INTERVAL_MS`.
 
 ## Auth and Security
@@ -116,6 +125,7 @@ Cache behavior is controlled by:
 - Core: `PORT`, `NODE_ENV`
 - Auth: `AUTH_USER`, `AUTH_PASS`, `SESSION_SECRET`, `COOKIE_SECURE`
 - Cache: `SITEMAP_CACHE_TTL_MS`, `SITEMAP_CACHE_REFRESH_INTERVAL_MS`
+- Failure backoff: `SITEMAP_FAILURE_STREAK_THRESHOLD`, `SITEMAP_FAILURE_BACKOFF_MULTIPLIER`
 - Cache purge: `SITEMAP_CACHE_MAX_AGE_MS`, `SITEMAP_CACHE_PURGE_INTERVAL_MS`
 - Rate limit: `DISCOVERY_RATE_LIMIT_WINDOW_MS`, `DISCOVERY_RATE_LIMIT_MAX`
 - Logging: `LOG_LEVEL`

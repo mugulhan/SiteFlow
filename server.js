@@ -63,6 +63,20 @@ const envSchema = z.object({
       (value) => !value || Number.isFinite(Number(value)),
       "SITEMAP_CACHE_REFRESH_INTERVAL_MS sayi olmali."
     ),
+  SITEMAP_FAILURE_STREAK_THRESHOLD: z
+    .string()
+    .optional()
+    .refine(
+      (value) => !value || Number.isFinite(Number(value)),
+      "SITEMAP_FAILURE_STREAK_THRESHOLD sayi olmali."
+    ),
+  SITEMAP_FAILURE_BACKOFF_MULTIPLIER: z
+    .string()
+    .optional()
+    .refine(
+      (value) => !value || Number.isFinite(Number(value)),
+      "SITEMAP_FAILURE_BACKOFF_MULTIPLIER sayi olmali."
+    ),
   SITEMAP_CACHE_MAX_AGE_MS: z
     .string()
     .optional()
@@ -287,6 +301,8 @@ const PAGE_WATCH_SCHEDULER_DELAY_MS = Number.isFinite(parsedPageWatchSchedulerDe
   : 2000;
 const parsedCacheTtl = Number(process.env.SITEMAP_CACHE_TTL_MS);
 const parsedRefreshInterval = Number(process.env.SITEMAP_CACHE_REFRESH_INTERVAL_MS);
+const parsedFailureStreakThreshold = Number(process.env.SITEMAP_FAILURE_STREAK_THRESHOLD);
+const parsedFailureBackoffMultiplier = Number(process.env.SITEMAP_FAILURE_BACKOFF_MULTIPLIER);
 const parsedCacheMaxAge = Number(process.env.SITEMAP_CACHE_MAX_AGE_MS);
 const parsedCachePurgeInterval = Number(process.env.SITEMAP_CACHE_PURGE_INTERVAL_MS);
 const parsedCrawlErrorsTtl = Number(process.env.CRAWL_ERRORS_TTL_MS);
@@ -294,6 +310,12 @@ const CACHE_TTL_MS = Number.isFinite(parsedCacheTtl) ? parsedCacheTtl : 15 * 60 
 const CACHE_REFRESH_INTERVAL_MS = Number.isFinite(parsedRefreshInterval)
   ? parsedRefreshInterval
   : 15 * 60 * 1000;
+const FAILURE_STREAK_THRESHOLD = Number.isFinite(parsedFailureStreakThreshold)
+  ? Math.max(2, Math.floor(parsedFailureStreakThreshold))
+  : 3;
+const FAILURE_BACKOFF_MULTIPLIER = Number.isFinite(parsedFailureBackoffMultiplier)
+  ? Math.max(2, Math.floor(parsedFailureBackoffMultiplier))
+  : 4;
 const CACHE_MAX_AGE_MS = Number.isFinite(parsedCacheMaxAge)
   ? parsedCacheMaxAge
   : 7 * 24 * 60 * 60 * 1000;
@@ -697,6 +719,167 @@ async function readCachedSitemap(url) {
   return { meta, xml };
 }
 
+function toTimestampMs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  return Math.floor(numeric);
+}
+
+function toIsoTimestamp(value) {
+  const timestamp = toTimestampMs(value);
+  if (!timestamp) {
+    return null;
+  }
+  return new Date(timestamp).toISOString();
+}
+
+function buildFailureStatusFromMeta(meta, { nowMs = Date.now() } = {}) {
+  const safeMeta = meta && typeof meta === "object" ? meta : {};
+  const consecutiveFailures = Math.max(
+    0,
+    Math.floor(Number(safeMeta.consecutiveFailures) || 0)
+  );
+  const firstFailureAtMs = toTimestampMs(safeMeta.firstFailureAt);
+  const lastFailureAtMs = toTimestampMs(safeMeta.lastFailureAt);
+  const fallbackSuccessAtMs = toTimestampMs(safeMeta.fetchedAt);
+  const lastSuccessAtMs = toTimestampMs(safeMeta.lastSuccessAt) || fallbackSuccessAtMs;
+  const nextRetryAtMs = toTimestampMs(safeMeta.nextRetryAt);
+  const isConsistentlyFailing = consecutiveFailures >= FAILURE_STREAK_THRESHOLD;
+  const backoffActive =
+    isConsistentlyFailing && nextRetryAtMs > 0 && nextRetryAtMs > nowMs;
+
+  return {
+    consecutiveFailures,
+    threshold: FAILURE_STREAK_THRESHOLD,
+    backoffMultiplier: FAILURE_BACKOFF_MULTIPLIER,
+    isConsistentlyFailing,
+    backoffActive,
+    firstFailureAtMs,
+    firstFailureAt: toIsoTimestamp(firstFailureAtMs),
+    lastFailureAtMs,
+    lastFailureAt: toIsoTimestamp(lastFailureAtMs),
+    lastSuccessAtMs,
+    lastSuccessAt: toIsoTimestamp(lastSuccessAtMs),
+    nextRetryAtMs,
+    nextRetryAt: toIsoTimestamp(nextRetryAtMs),
+    lastFailureType:
+      typeof safeMeta.lastFailureType === "string" ? safeMeta.lastFailureType : "",
+    lastFailureCode:
+      typeof safeMeta.lastFailureCode === "string" ? safeMeta.lastFailureCode : "",
+    lastFailureMessage:
+      typeof safeMeta.lastFailureMessage === "string" ? safeMeta.lastFailureMessage : "",
+  };
+}
+
+function computeFailureBackoffMs(consecutiveFailures) {
+  const failures = Math.max(0, Math.floor(Number(consecutiveFailures) || 0));
+  if (failures < FAILURE_STREAK_THRESHOLD) {
+    return 0;
+  }
+  const baseIntervalMs =
+    CACHE_REFRESH_INTERVAL_MS > 0 ? CACHE_REFRESH_INTERVAL_MS : CACHE_TTL_MS;
+  if (!Number.isFinite(baseIntervalMs) || baseIntervalMs <= 0) {
+    return 0;
+  }
+  return Math.floor(baseIntervalMs * FAILURE_BACKOFF_MULTIPLIER);
+}
+
+function extractFetchFailureDetails(error) {
+  const status = Number(error?.status);
+  const safeStatus = Number.isFinite(status) ? status : 0;
+  const safeCode =
+    typeof error?.code === "string"
+      ? error.code
+      : typeof error?.cause?.code === "string"
+      ? error.cause.code
+      : "";
+  const safeMessage =
+    typeof error?.message === "string" && error.message.trim()
+      ? error.message.trim()
+      : "Unknown error";
+  const type = classifyFetchError({
+    status: safeStatus,
+    code: safeCode,
+    message: safeMessage,
+  });
+  return {
+    status: safeStatus,
+    code: safeCode,
+    type,
+    message: safeMessage.slice(0, 500),
+  };
+}
+
+async function writeCacheMeta(url, payload) {
+  await ensureCacheDir();
+  const { metaPath } = getCachePaths(url);
+  await fs.writeFile(metaPath, JSON.stringify(payload, null, 2), "utf8");
+  return payload;
+}
+
+async function recordCacheRefreshFailure(
+  url,
+  error,
+  { attemptFetchMode = "", attemptResponseType = "", staleReason = "" } = {}
+) {
+  if (!url) {
+    return null;
+  }
+  const attemptedAt = Date.now();
+  const existingMeta = await readCacheMeta(url);
+  const previousStatus = buildFailureStatusFromMeta(existingMeta, { nowMs: attemptedAt });
+  const nextFailures = previousStatus.consecutiveFailures + 1;
+  const backoffMs = computeFailureBackoffMs(nextFailures);
+  const nextRetryAt = backoffMs > 0 ? attemptedAt + backoffMs : 0;
+  const failure = extractFetchFailureDetails(error);
+
+  const mergedMeta = {
+    ...(existingMeta && typeof existingMeta === "object" ? existingMeta : {}),
+    url,
+    fetchedAt: toTimestampMs(existingMeta?.fetchedAt),
+    statusCode: Number.isFinite(Number(existingMeta?.statusCode))
+      ? Number(existingMeta.statusCode)
+      : failure.status,
+    contentType:
+      typeof existingMeta?.contentType === "string" && existingMeta.contentType
+        ? existingMeta.contentType
+        : "application/xml; charset=utf-8",
+    fetchMode: typeof existingMeta?.fetchMode === "string" ? existingMeta.fetchMode : "",
+    responseType:
+      typeof existingMeta?.responseType === "string" ? existingMeta.responseType : "",
+    staleReason:
+      typeof staleReason === "string" && staleReason
+        ? staleReason
+        : typeof existingMeta?.staleReason === "string"
+        ? existingMeta.staleReason
+        : "",
+    bytes: Number.isFinite(Number(existingMeta?.bytes)) ? Number(existingMeta.bytes) : 0,
+    etag: typeof existingMeta?.etag === "string" ? existingMeta.etag : "",
+    lastModified:
+      typeof existingMeta?.lastModified === "string" ? existingMeta.lastModified : "",
+    lastAttemptAt: attemptedAt,
+    lastAttemptFetchMode:
+      typeof attemptFetchMode === "string" ? attemptFetchMode : "",
+    lastAttemptResponseType:
+      typeof attemptResponseType === "string" ? attemptResponseType : "",
+    consecutiveFailures: nextFailures,
+    firstFailureAt:
+      previousStatus.consecutiveFailures > 0 && previousStatus.firstFailureAtMs
+        ? previousStatus.firstFailureAtMs
+        : attemptedAt,
+    lastFailureAt: attemptedAt,
+    lastFailureType: failure.type,
+    lastFailureCode: failure.code || "",
+    lastFailureMessage: failure.message,
+    lastSuccessAt: previousStatus.lastSuccessAtMs || 0,
+    nextRetryAt,
+  };
+
+  return writeCacheMeta(url, mergedMeta);
+}
+
 function getCrawlErrorsPaths(url) {
   const key = getCacheKey(url);
   return {
@@ -800,9 +983,10 @@ function isCacheFresh(meta) {
 async function writeCache(url, xml, meta = {}) {
   await ensureCacheDir();
   const { xmlPath, metaPath } = getCachePaths(url);
+  const now = Date.now();
   const payload = {
     url,
-    fetchedAt: Date.now(),
+    fetchedAt: now,
     statusCode: meta.statusCode || 200,
     contentType: meta.contentType || "application/xml; charset=utf-8",
     fetchMode: meta.fetchMode || "fetch",
@@ -811,6 +995,17 @@ async function writeCache(url, xml, meta = {}) {
     bytes: Buffer.byteLength(xml || "", "utf8"),
     etag: meta.etag || "",
     lastModified: meta.lastModified || "",
+    lastAttemptAt: now,
+    lastAttemptFetchMode: meta.fetchMode || "fetch",
+    lastAttemptResponseType: meta.responseType || "xml",
+    consecutiveFailures: 0,
+    firstFailureAt: 0,
+    lastFailureAt: 0,
+    lastFailureType: "",
+    lastFailureCode: "",
+    lastFailureMessage: "",
+    lastSuccessAt: now,
+    nextRetryAt: 0,
   };
   await fs.writeFile(xmlPath, xml, "utf8");
   await fs.writeFile(metaPath, JSON.stringify(payload, null, 2), "utf8");
@@ -1794,74 +1989,91 @@ async function refreshCacheForUrl(url, { force = false } = {}) {
     if (meta && isCacheFresh(meta)) {
       return { skipped: true, meta };
     }
+    const failureStatus = buildFailureStatusFromMeta(meta);
+    if (failureStatus.backoffActive) {
+      return { skipped: true, deferred: true, meta };
+    }
   }
 
   return withFetchSlot(async () => {
-    const result = await fetchSitemapXmlWithRetry(url);
-    if (result.responseType === "html") {
-      const cached = await readCachedSitemap(url);
-      if (cached && typeof cached.xml === "string" && cached.xml) {
-        const meta = await updateCacheMeta(url, {
-          staleReason: "waf",
-          lastAttemptAt: Date.now(),
-          lastAttemptFetchMode: result.fetchMode || "",
-          lastAttemptResponseType: result.responseType || "html",
-        });
-        return {
-          ...result,
-          xml: cached.xml,
-          statusCode: cached.meta?.statusCode || 200,
-          contentType: cached.meta?.contentType || result.contentType,
-          etag: cached.meta?.etag || "",
-          lastModified: cached.meta?.lastModified || "",
-          meta: meta || cached.meta || null,
-          skipped: false,
-          cacheSkipped: true,
-          staleReason: "waf",
-          servedFromCache: true,
-        };
-      }
-
-      // Some WAFs return HTTP 200 with an HTML challenge page. In that case,
-      // try Puppeteer once before declaring a hard failure.
-      console.warn(`HTML response detected for ${url} (likely WAF). Trying Puppeteer...`);
-      try {
-        const puppeteerContent = await fetchWithPuppeteer(url, PROXY_TIMEOUT_MS);
-        const responseType = detectResponseType(puppeteerContent);
-        if (responseType !== "html") {
-          const meta = await writeCache(url, puppeteerContent, {
-            statusCode: 200,
-            contentType: "application/xml; charset=utf-8",
-            etag: "",
-            lastModified: "",
-            fetchMode: "puppeteer",
-            responseType: responseType,
-          });
+    try {
+      const result = await fetchSitemapXmlWithRetry(url);
+      if (result.responseType === "html") {
+        const cached = await readCachedSitemap(url);
+        if (cached && typeof cached.xml === "string" && cached.xml) {
+          const wafError = new SitemapFetchError(
+            "Site WAF tarafindan engellendi. HTML yaniti alindi.",
+            502,
+            "HTML_RESPONSE"
+          );
+          const meta = await recordCacheRefreshFailure(url, wafError, {
+            attemptFetchMode: result.fetchMode || "",
+            attemptResponseType: result.responseType || "html",
+            staleReason: "waf",
+          }).catch(() => cached.meta || null);
           return {
-            xml: puppeteerContent,
-            statusCode: 200,
-            contentType: "application/xml; charset=utf-8",
-            fetchMode: "puppeteer",
-            responseType,
+            ...result,
+            xml: cached.xml,
+            statusCode: cached.meta?.statusCode || 200,
+            contentType: cached.meta?.contentType || result.contentType,
+            etag: cached.meta?.etag || "",
+            lastModified: cached.meta?.lastModified || "",
             meta,
             skipped: false,
+            cacheSkipped: true,
+            staleReason: "waf",
+            servedFromCache: true,
           };
         }
-      } catch (puppeteerError) {
-        console.error("Puppeteer WAF retry failed:", puppeteerError.message || puppeteerError);
-      }
 
-      throw new SitemapFetchError("Site WAF tarafindan engellendi. HTML yaniti alindi.", 502);
+        // Some WAFs return HTTP 200 with an HTML challenge page. In that case,
+        // try Puppeteer once before declaring a hard failure.
+        console.warn(`HTML response detected for ${url} (likely WAF). Trying Puppeteer...`);
+        try {
+          const puppeteerContent = await fetchWithPuppeteer(url, PROXY_TIMEOUT_MS);
+          const responseType = detectResponseType(puppeteerContent);
+          if (responseType !== "html") {
+            const meta = await writeCache(url, puppeteerContent, {
+              statusCode: 200,
+              contentType: "application/xml; charset=utf-8",
+              etag: "",
+              lastModified: "",
+              fetchMode: "puppeteer",
+              responseType: responseType,
+            });
+            return {
+              xml: puppeteerContent,
+              statusCode: 200,
+              contentType: "application/xml; charset=utf-8",
+              fetchMode: "puppeteer",
+              responseType,
+              meta,
+              skipped: false,
+            };
+          }
+        } catch (puppeteerError) {
+          console.error("Puppeteer WAF retry failed:", puppeteerError.message || puppeteerError);
+        }
+
+        throw new SitemapFetchError("Site WAF tarafindan engellendi. HTML yaniti alindi.", 502);
+      }
+      const meta = await writeCache(url, result.xml, {
+        statusCode: result.statusCode,
+        contentType: result.contentType,
+        etag: result.etag,
+        lastModified: result.lastModified,
+        fetchMode: result.fetchMode,
+        responseType: result.responseType,
+      });
+      return { ...result, meta, skipped: false };
+    } catch (error) {
+      try {
+        await recordCacheRefreshFailure(url, error);
+      } catch (metaError) {
+        console.warn("Cache failure metadata yazilamadi:", metaError.message || metaError);
+      }
+      throw error;
     }
-    const meta = await writeCache(url, result.xml, {
-      statusCode: result.statusCode,
-      contentType: result.contentType,
-      etag: result.etag,
-      lastModified: result.lastModified,
-      fetchMode: result.fetchMode,
-      responseType: result.responseType,
-    });
-    return { ...result, meta, skipped: false };
   });
 }
 
@@ -6688,6 +6900,13 @@ async function refreshAllSitemaps({ force = false } = {}) {
     if (!url) {
       continue;
     }
+    if (!force) {
+      const meta = await readCacheMeta(url);
+      const failureStatus = buildFailureStatusFromMeta(meta);
+      if (failureStatus.backoffActive) {
+        continue;
+      }
+    }
     tasks.push(
       scheduleCacheRefresh(url, { force }).catch((err) => {
         console.warn("Cache refresh skipped:", err.message || err);
@@ -6808,14 +7027,17 @@ app.get("/api/sitemaps", requireAuth, async (req, res, next) => {
   try {
     const sitemaps = await readSitemaps();
     const history = await readHealthHistory();
-    const enriched = sitemaps.map((entry) => {
+    const enriched = await Promise.all(sitemaps.map(async (entry) => {
       const url = typeof entry?.url === "string" ? normalizeUrl(entry.url) : null;
       const alert = url ? buildAlertForHistory(history[url]) : null;
+      const cacheMeta = url ? await readCacheMeta(url) : null;
+      const failureStatus = buildFailureStatusFromMeta(cacheMeta);
       return {
         ...entry,
         alert,
+        failureStatus,
       };
-    });
+    }));
     res.json(enriched);
   } catch (error) {
     next(error);
@@ -8435,7 +8657,7 @@ app.get("/api/fetch-sitemap", requireAuth, async (req, res, next) => {
         res.set("X-Sitemap-Stale", cached.meta.staleReason);
       }
       res.send(cached.xml);
-      scheduleCacheRefresh(targetUrl, { force: true }).catch((error) => {
+      scheduleCacheRefresh(targetUrl, { force: false }).catch((error) => {
         console.warn("Cache refresh failed:", error.message || error);
       });
       return;
