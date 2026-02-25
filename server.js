@@ -4300,6 +4300,17 @@ function dedupeDiscoveryResults(lists) {
 }
 
 async function verifyCandidateUrl(url, { timeout = DISCOVERY_VERIFY_TIMEOUT_MS } = {}) {
+  try {
+    await assertPublicUrl(url);
+  } catch (_error) {
+    return {
+      ok: false,
+      statusCode: 403,
+      contentType: "",
+      reason: "blocked",
+    };
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
